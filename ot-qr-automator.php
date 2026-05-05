@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: OT QR Automator
- * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Link público con clave para subir y panel con clave para listar/editar OTs. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.1.8
+ * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
+ * Version: 0.1.9
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -45,7 +45,7 @@ final class OTQR_Automator {
     public static function add_rewrites() {
         add_rewrite_rule('^otqr/?$', 'index.php?otqr_home=1', 'top');          // buscar (sin clave)
         add_rewrite_rule('^otqr/upload/?$', 'index.php?otqr_upload=1', 'top'); // subir (con clave) => SOLO PDF
-        add_rewrite_rule('^otqr/manage/?$', 'index.php?otqr_manage=1', 'top'); // gestionar (con clave)
+        add_rewrite_rule('^otqr/manage/?$', 'index.php?otqr_manage=1', 'top'); // gestionar (login + capability)
 
         add_rewrite_rule('^ot/([0-9]+)/cover/?$', 'index.php?otqr_cover=1&otqr_num=$matches[1]', 'top');
         add_rewrite_rule('^ot/([0-9]+)/?$', 'index.php?post_type=' . self::CPT . '&name=$matches[1]&otqr_num=$matches[1]', 'top');
@@ -140,13 +140,13 @@ final class OTQR_Automator {
 
         $key=self::get_public_key();
         $upload_url=add_query_arg(['k'=>$key], home_url('/otqr/upload/'));
-        $manage_url=add_query_arg(['k'=>$key], home_url('/otqr/manage/'));
+        $manage_url=home_url('/otqr/manage/');
         ?>
         <div class="wrap">
             <h1>OT QR Automator</h1>
             <?php if ($notice): ?><div class="notice notice-success is-dismissible"><p><?php echo esc_html($notice); ?></p></div><?php endif; ?>
 
-            <h2>Links con clave</h2>
+            <h2>Links</h2>
             <p><strong>Subir (solo PDF):</strong> <a href="<?php echo esc_url($upload_url); ?>" target="_blank" rel="noopener"><?php echo esc_html($upload_url); ?></a></p>
             <p><strong>Gestionar:</strong> <a href="<?php echo esc_url($manage_url); ?>" target="_blank" rel="noopener"><?php echo esc_html($manage_url); ?></a></p>
 
@@ -361,7 +361,7 @@ final class OTQR_Automator {
         $title='Gestionar OTs'; $err=''; $msg='';
 
         if (!is_user_logged_in()) {
-            wp_safe_redirect(wp_login_url(home_url(add_query_arg([], $_SERVER['REQUEST_URI']))));
+            wp_safe_redirect(wp_login_url(home_url('/otqr/manage/')));
             exit;
         }
 
@@ -370,8 +370,7 @@ final class OTQR_Automator {
             exit;
         }
 
-        $k=isset($_GET['k'])?sanitize_text_field(wp_unslash($_GET['k'])):'';
-        $nonce_action=self::key_nonce_action();
+        $nonce_action='otqr_manage_action';
         $nonce_val=wp_create_nonce($nonce_action);
 
         $ot_edit=isset($_GET['edit'])?self::normalize_ot_number(wp_unslash($_GET['edit'])):'';
@@ -444,7 +443,7 @@ final class OTQR_Automator {
         $query=new WP_Query(['post_type'=>self::CPT,'post_status'=>'publish','posts_per_page'=>$per_page,'paged'=>$paged,'orderby'=>'date','order'=>'DESC','fields'=>'ids']);
         $total_pages=max(1,intval($query->max_num_pages));
 
-        $upload_url=add_query_arg(['k'=>$k], home_url('/otqr/upload/'));
+        $upload_url=add_query_arg(['k'=>self::get_public_key()], home_url('/otqr/upload/'));
         $base_url=home_url('/otqr/manage/');
 
         ob_start(); ?>
@@ -468,7 +467,7 @@ final class OTQR_Automator {
                 $attach=intval(get_post_meta($pid,self::META_ATTACHMENT_ID,true));
                 $pdf_url=$attach?wp_get_attachment_url($attach):'';
                 $cover_url=home_url('/ot/'.$num.'/cover/');
-                $edit_url=add_query_arg(['k'=>$k,'edit'=>$num], $base_url);
+                $edit_url=add_query_arg(['edit'=>$num], $base_url);
             ?>
               <tr>
                 <td><span class="pill"><?php echo esc_html($num); ?></span></td>
@@ -483,8 +482,8 @@ final class OTQR_Automator {
             </tbody></table>
 
             <?php if ($total_pages>1):
-              $prev=$paged>1?add_query_arg(['k'=>$k,'p'=>$paged-1], $base_url):'';
-              $next=$paged<$total_pages?add_query_arg(['k'=>$k,'p'=>$paged+1], $base_url):'';
+              $prev=$paged>1?add_query_arg(['p'=>$paged-1], $base_url):'';
+              $next=$paged<$total_pages?add_query_arg(['p'=>$paged+1], $base_url):'';
             ?>
               <div class="row" style="margin-top:14px;">
                 <?php if($prev): ?><a class="btn" href="<?php echo esc_url($prev); ?>">← Anterior</a><?php endif; ?>
