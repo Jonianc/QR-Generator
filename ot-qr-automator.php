@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.2.4
+ * Version: 0.3.0
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -12,9 +12,14 @@ final class OTQR_Automator {
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
     const OPT_VERSION = 'otqr_plugin_version';
-    const VERSION = '0.2.4';
+    const VERSION = '0.3.0';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
+    const META_PDF_PRIVATE_PATH = '_otqr_pdf_private_path';
+    const META_PDF_ORIGINAL_NAME = '_otqr_pdf_original_name';
+    const META_PDF_SIZE = '_otqr_pdf_size';
+    const META_PDF_HASH = '_otqr_pdf_hash';
+    const META_PDF_UPDATED_AT = '_otqr_pdf_updated_at';
     const META_MODELO = '_otqr_modelo';
     const META_CLIENTE = '_otqr_cliente';
     const META_PUBLIC_TOKEN = '_otqr_public_token';
@@ -77,6 +82,8 @@ final class OTQR_Automator {
         if (!get_option(self::OPT_PUBLIC_KEY)) { add_option(self::OPT_PUBLIC_KEY, self::generate_key(20)); }
         self::ensure_tokens_for_existing_ots();
         self::ensure_default_boxes();
+        self::ensure_private_pdf_storage();
+        self::migrate_public_attachments_to_private();
         update_option(self::OPT_VERSION, self::VERSION);
         flush_rewrite_rules();
     }
@@ -88,6 +95,8 @@ final class OTQR_Automator {
             self::add_rewrites();
             self::ensure_tokens_for_existing_ots();
             self::ensure_default_boxes();
+            self::ensure_private_pdf_storage();
+            self::migrate_public_attachments_to_private();
             flush_rewrite_rules();
             update_option(self::OPT_VERSION, self::VERSION);
         }
@@ -193,6 +202,72 @@ final class OTQR_Automator {
 
     private static function get_public_key(){ $k=get_option(self::OPT_PUBLIC_KEY,''); return is_string($k)?trim($k):''; }
 
+    private static function get_private_pdf_dir(){
+        $uploads=wp_get_upload_dir();
+        $base=isset($uploads['basedir'])?$uploads['basedir']:'';
+        if (!is_string($base) || $base==='') return '';
+        return trailingslashit($base).'otqr-private';
+    }
+    private static function ensure_private_pdf_storage(){
+        $dir=self::get_private_pdf_dir(); if ($dir==='') return false;
+        if (!file_exists($dir)) wp_mkdir_p($dir);
+        if (!is_dir($dir) || !is_writable($dir)) return false;
+        if (!file_exists($dir.'/index.php')) file_put_contents($dir.'/index.php', "<?php\n");
+        if (!file_exists($dir.'/.htaccess')) file_put_contents($dir.'/.htaccess', "Order deny,allow\nDeny from all\n<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n");
+        if (!file_exists($dir.'/web.config')) file_put_contents($dir.'/web.config', "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration>\n  <system.webServer>\n    <security>\n      <authorization>\n        <remove users=\"*\" roles=\"\" verbs=\"\"/>\n        <add accessType=\"Deny\" users=\"*\"/>\n      </authorization>\n    </security>\n  </system.webServer>\n</configuration>\n");
+        return true;
+    }
+    private static function sanitize_pdf_filename($name){
+        $name=is_string($name)?trim($name):'documento.pdf';
+        $clean=sanitize_file_name($name);
+        if ($clean==='') $clean='documento.pdf';
+        if (!preg_match('/\.pdf$/i',$clean)) $clean.='.pdf';
+        return $clean;
+    }
+    private static function generate_private_pdf_name(){ return 'otqr_'.bin2hex(random_bytes(16)).'.pdf'; }
+    private static function save_uploaded_pdf_privately($file){
+        if (!self::ensure_private_pdf_storage()) return ['ok'=>false,'error'=>'No se pudo preparar el almacenamiento privado.'];
+        $tmp=isset($file['tmp_name'])?$file['tmp_name']:'';
+        if (!is_string($tmp) || $tmp==='' || !is_uploaded_file($tmp)) return ['ok'=>false,'error'=>'Archivo temporal inválido.'];
+        $dest=trailingslashit(self::get_private_pdf_dir()).self::generate_private_pdf_name();
+        if (!move_uploaded_file($tmp,$dest)) return ['ok'=>false,'error'=>'No se pudo mover el PDF al almacenamiento privado.'];
+        $size=@filesize($dest);
+        if (!$size || $size<1) { @unlink($dest); return ['ok'=>false,'error'=>'El PDF privado quedó vacío.']; }
+        return ['ok'=>true,'path'=>$dest,'size'=>intval($size),'hash'=>@hash_file('sha256',$dest)];
+    }
+    private static function get_valid_private_pdf_path($post_id){
+        $path=get_post_meta($post_id,self::META_PDF_PRIVATE_PATH,true);
+        if (!is_string($path) || $path==='') return '';
+        $base=realpath(self::get_private_pdf_dir()); $real=realpath($path);
+        if (!$base || !$real) return '';
+        if (strpos($real,$base.DIRECTORY_SEPARATOR)!==0 && $real!==$base) return '';
+        if (!is_file($real) || !is_readable($real)) return '';
+        return $real;
+    }
+    private static function set_private_pdf_meta($post_id,$path,$original_name,$size,$hash){
+        update_post_meta($post_id,self::META_PDF_PRIVATE_PATH,$path);
+        update_post_meta($post_id,self::META_PDF_ORIGINAL_NAME,self::sanitize_pdf_filename($original_name));
+        update_post_meta($post_id,self::META_PDF_SIZE,intval($size));
+        update_post_meta($post_id,self::META_PDF_HASH,is_string($hash)?$hash:'');
+        update_post_meta($post_id,self::META_PDF_UPDATED_AT,current_time('mysql'));
+    }
+    private static function migrate_public_attachments_to_private(){
+        if (!self::ensure_private_pdf_storage()) return;
+        $ids=get_posts(['post_type'=>self::CPT,'post_status'=>'any','numberposts'=>-1,'fields'=>'ids']);
+        foreach($ids as $pid){
+            $pid=intval($pid); $private=get_post_meta($pid,self::META_PDF_PRIVATE_PATH,true);
+            if (is_string($private) && $private!=='') continue;
+            $attach_id=intval(get_post_meta($pid,self::META_ATTACHMENT_ID,true)); if (!$attach_id) continue;
+            $source=get_attached_file($attach_id);
+            if (!is_string($source) || !is_file($source) || !is_readable($source)) continue;
+            $dest=trailingslashit(self::get_private_pdf_dir()).self::generate_private_pdf_name();
+            if (!copy($source,$dest)) continue;
+            $size=@filesize($dest); if (!$size || $size<1) { @unlink($dest); continue; }
+            $original_name=get_the_title($attach_id); if (!is_string($original_name)||$original_name==='') $original_name=wp_basename($source);
+            self::set_private_pdf_meta($pid,$dest,$original_name,intval($size),@hash_file('sha256',$dest));
+            wp_delete_attachment($attach_id,true); delete_post_meta($pid,self::META_ATTACHMENT_ID);
+        }
+    }
 
 
     private static function generate_public_token() {
@@ -426,34 +501,19 @@ final class OTQR_Automator {
                                 $otqr_id=self::upsert_ot_post($ot);
                                 if (!$otqr_id) $err='Error guardando la OT.';
                                 else {
-                                    $old_attach=intval(get_post_meta($otqr_id,self::META_ATTACHMENT_ID,true));
-                                    require_once ABSPATH.'wp-admin/includes/file.php';
-                                    $overrides=[
-                                        'test_form'=>false,
-                                        'mimes'=>['pdf'=>'application/pdf'],
-                                        'unique_filename_callback'=>function($dir,$name,$ext)use($ot,$modelo,$cliente){
-                                            $safe_modelo=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$modelo)));
-                                            $safe_cliente=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$cliente)));
-                                            $base='OT '.$ot.', '.mb_substr($safe_modelo,0,25).', '.mb_substr($safe_cliente,0,35);
-                                            return $base.$ext;
-                                        }
-                                    ];
-                                    $uploaded=wp_handle_upload($_FILES['ot_pdf'],$overrides);
-                                    if (isset($uploaded['error'])) $err='Error subiendo el PDF: '.$uploaded['error'];
+                                    $old_private=self::get_valid_private_pdf_path($otqr_id);
+                                    $saved=self::save_uploaded_pdf_privately($_FILES['ot_pdf']);
+                                    if (!$saved['ok']) $err=$saved['error'];
                                     else {
-                                        $attach_id=self::insert_pdf_as_attachment($uploaded);
-                                        if (!$attach_id) $err='PDF subido, pero no se pudo registrar en Media.';
-                                        else {
-                                            update_post_meta($otqr_id,self::META_ATTACHMENT_ID,$attach_id);
-                                            update_post_meta($otqr_id,self::META_MODELO,$modelo);
-                                            update_post_meta($otqr_id,self::META_CLIENTE,$cliente);
-                                            update_post_meta($otqr_id,self::META_BOX_ID,$box_id);
-                                            $delete_old=isset($_POST['delete_old'])?sanitize_text_field(wp_unslash($_POST['delete_old'])):'';
-                                            if ($delete_old==='1' && $old_attach) wp_delete_attachment($old_attach,true);
-                                            $msg='OT subida correctamente.';
-                                            $token=self::ensure_public_token($otqr_id);
-                                            $cover_url=home_url('/otqr/cover/'.$token.'/');
-                                        }
+                                        self::set_private_pdf_meta($otqr_id,$saved['path'],$_FILES['ot_pdf']['name'],$saved['size'],$saved['hash']);
+                                        update_post_meta($otqr_id,self::META_MODELO,$modelo);
+                                        update_post_meta($otqr_id,self::META_CLIENTE,$cliente);
+                                        update_post_meta($otqr_id,self::META_BOX_ID,$box_id);
+                                        delete_post_meta($otqr_id,self::META_ATTACHMENT_ID);
+                                        if ($old_private && $old_private!==$saved['path'] && file_exists($old_private)) @unlink($old_private);
+                                        $msg='OT subida correctamente.';
+                                        $token=self::ensure_public_token($otqr_id);
+                                        $cover_url=home_url('/otqr/cover/'.$token.'/');
                                     }
                                 }
                             }
@@ -552,24 +612,14 @@ final class OTQR_Automator {
                             if ($filetype['ext']!=='pdf') $err='El archivo debe ser PDF.';
                             else {
                                 // En reemplazo permitimos nombre no estricto, pero si viene con formato lo usamos:
-                                $old_attach=intval(get_post_meta($post_id,self::META_ATTACHMENT_ID,true));
-
-                                require_once ABSPATH.'wp-admin/includes/file.php';
-                                $overrides=['test_form'=>false,'mimes'=>['pdf'=>'application/pdf'],'unique_filename_callback'=>function($dir,$name,$ext)use($target){ return 'OT '.$target.$ext; }];
-                                $uploaded=wp_handle_upload($_FILES['ot_pdf'],$overrides);
-
-                                if (isset($uploaded['error'])) $err='Error subiendo el PDF: '.$uploaded['error'];
+                                $old_private=self::get_valid_private_pdf_path($post_id);
+                                $saved=self::save_uploaded_pdf_privately($_FILES['ot_pdf']);
+                                if (!$saved['ok']) $err=$saved['error'];
                                 else {
-                                    $attach_id=self::insert_pdf_as_attachment($uploaded);
-                                    if (!$attach_id) $err='PDF subido, pero no se pudo registrar en Media.';
-                                    else {
-                                        update_post_meta($post_id,self::META_ATTACHMENT_ID,$attach_id);
-
-                                        $delete_old=isset($_POST['delete_old'])?sanitize_text_field(wp_unslash($_POST['delete_old'])):'';
-                                        if ($delete_old==='1' && $old_attach) wp_delete_attachment($old_attach,true);
-
-                                        $msg='PDF actualizado.'; $ot_edit=$target;
-                                    }
+                                    self::set_private_pdf_meta($post_id,$saved['path'],$_FILES['ot_pdf']['name'],$saved['size'],$saved['hash']);
+                                    delete_post_meta($post_id,self::META_ATTACHMENT_ID);
+                                    if ($old_private && $old_private!==$saved['path'] && file_exists($old_private)) @unlink($old_private);
+                                    $msg='PDF actualizado.'; $ot_edit=$target;
                                 }
                             }
                         }
@@ -585,8 +635,10 @@ final class OTQR_Automator {
                     } elseif ($do==='delete_ot'){
                         $delete_attach=isset($_POST['delete_attach'])?sanitize_text_field(wp_unslash($_POST['delete_attach'])):'';
                         $attach_id=intval(get_post_meta($post_id,self::META_ATTACHMENT_ID,true));
+                        $private_path=self::get_valid_private_pdf_path($post_id);
                         wp_delete_post($post_id,true);
                         if ($delete_attach==='1' && $attach_id) wp_delete_attachment($attach_id,true);
+                        if ($private_path && file_exists($private_path)) @unlink($private_path);
                         $msg='OT eliminada.'; $ot_edit='';
                     }
                 }
@@ -625,11 +677,11 @@ final class OTQR_Automator {
                 $num=get_post_field('post_name',$pid);
                 $modelo=get_post_meta($pid,self::META_MODELO,true);
                 $cliente=get_post_meta($pid,self::META_CLIENTE,true);
-                $attach=intval(get_post_meta($pid,self::META_ATTACHMENT_ID,true));
+                $private_pdf=self::get_valid_private_pdf_path($pid);
                 $box_label=self::get_box_label_for_ot($pid);
                 $token=self::ensure_public_token($pid);
                 $view_url=home_url('/otqr/ver/'.$token.'/');
-                $pdf_url=$attach?$view_url:'';
+                $pdf_url=$private_pdf?$view_url:'';
                 $cover_url=home_url('/otqr/cover/'.$token.'/');
                 $edit_url=add_query_arg(['edit'=>$num], $base_url);
             ?>
@@ -667,10 +719,10 @@ final class OTQR_Automator {
             <?php if ($ot_edit):
               $pid=self::get_ot_post_by_number($ot_edit);
               if ($pid):
-                $attach=intval(get_post_meta($pid,self::META_ATTACHMENT_ID,true));
+                $private_pdf=self::get_valid_private_pdf_path($pid);
                 $token=self::ensure_public_token($pid);
                 $view_url=home_url('/otqr/ver/'.$token.'/');
-                $pdf_url=$attach?$view_url:'';
+                $pdf_url=$private_pdf?$view_url:'';
                 $cover_url=home_url('/otqr/cover/'.$token.'/');
                 $modelo=get_post_meta($pid,self::META_MODELO,true);
                 $cliente=get_post_meta($pid,self::META_CLIENTE,true);
@@ -771,12 +823,17 @@ final class OTQR_Automator {
             $token=sanitize_text_field($token);
             $post_id=self::get_ot_post_by_token($token);
             if (!$post_id){ status_header(404); exit; }
-            $attachment_id=intval(get_post_meta($post_id,self::META_ATTACHMENT_ID,true));
-            if (!$attachment_id){ status_header(404); exit; }
-            $url=wp_get_attachment_url($attachment_id);
-            if (!$url){ status_header(404); exit; }
+            $path=self::get_valid_private_pdf_path($post_id);
+            if ($path===''){ status_header(404); exit; }
+            $filename=self::sanitize_pdf_filename(get_post_meta($post_id,self::META_PDF_ORIGINAL_NAME,true));
+            $size=@filesize($path);
+            if (!$size || $size<1){ status_header(404); exit; }
+            nocache_headers();
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: inline; filename="'.str_replace('\"','',$filename).'"');
+            header('Content-Length: '.intval($size));
             header('X-Robots-Tag: noindex, nofollow', true);
-            wp_redirect($url,302);
+            readfile($path);
             exit;
         }
 

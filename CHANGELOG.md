@@ -6,6 +6,18 @@ Todos los cambios relevantes de este plugin se documentan en este archivo.
 
 - _Sin cambios aún._
 
+## [0.3.0]
+
+### Agregado
+- Almacenamiento privado para PDFs en `uploads/otqr-private` con archivos de protección (`index.php`, `.htaccess`, `web.config`).
+- Entrega de PDFs mediante ruta tokenizada `/otqr/ver/{token}/` controlada por PHP.
+- Metadatos privados por OT: ruta, nombre original, tamaño, hash y fecha de actualización.
+- Migración automática (una sola vez por versión) de PDFs existentes desde Media Library/uploads al almacenamiento privado.
+
+### Seguridad
+- Los PDFs ya no quedan expuestos como enlaces directos de `/wp-content/uploads/` tras migración exitosa.
+- Validación de ruta privada con `realpath()` para evitar path traversal al servir PDFs.
+
 ## [0.2.4]
 
 ### Corregido
