@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: OT QR Automator
- * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Link público con clave para subir y panel con clave para listar/editar OTs. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.1.7
+ * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
+ * Version: 0.2.1
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -11,10 +11,13 @@ final class OTQR_Automator {
     const CPT = 'otqr';
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
+    const OPT_VERSION = 'otqr_plugin_version';
+    const VERSION = '0.2.1';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
     const META_MODELO = '_otqr_modelo';
     const META_CLIENTE = '_otqr_cliente';
+    const META_PUBLIC_TOKEN = '_otqr_public_token';
 
     public static function init() {
         add_action('init', [__CLASS__, 'register_cpt']);
@@ -24,6 +27,7 @@ final class OTQR_Automator {
 
         add_action('admin_menu', [__CLASS__, 'admin_menu']);
         add_action('admin_post_otqr_save_key', [__CLASS__, 'handle_admin_save_key']);
+        add_action('init', [__CLASS__, 'maybe_run_upgrade'], 20);
 
         register_activation_hook(__FILE__, [__CLASS__, 'on_activate']);
         register_deactivation_hook(__FILE__, [__CLASS__, 'on_deactivate']);
@@ -45,14 +49,17 @@ final class OTQR_Automator {
     public static function add_rewrites() {
         add_rewrite_rule('^otqr/?$', 'index.php?otqr_home=1', 'top');          // buscar (sin clave)
         add_rewrite_rule('^otqr/upload/?$', 'index.php?otqr_upload=1', 'top'); // subir (con clave) => SOLO PDF
-        add_rewrite_rule('^otqr/manage/?$', 'index.php?otqr_manage=1', 'top'); // gestionar (con clave)
+        add_rewrite_rule('^otqr/manage/?$', 'index.php?otqr_manage=1', 'top'); // gestionar (login + capability)
+
+        add_rewrite_rule('^otqr/cover/([a-f0-9]{32})/?$', 'index.php?otqr_token_cover=1&otqr_token=$matches[1]', 'top');
+        add_rewrite_rule('^otqr/ver/([a-f0-9]{32})/?$', 'index.php?otqr_token_view=1&otqr_token=$matches[1]', 'top');
 
         add_rewrite_rule('^ot/([0-9]+)/cover/?$', 'index.php?otqr_cover=1&otqr_num=$matches[1]', 'top');
         add_rewrite_rule('^ot/([0-9]+)/?$', 'index.php?post_type=' . self::CPT . '&name=$matches[1]&otqr_num=$matches[1]', 'top');
     }
 
     public static function register_query_vars($vars) {
-        $vars[]='otqr_cover'; $vars[]='otqr_num'; $vars[]='otqr_home'; $vars[]='otqr_upload'; $vars[]='otqr_manage';
+        $vars[]='otqr_cover'; $vars[]='otqr_num'; $vars[]='otqr_home'; $vars[]='otqr_upload'; $vars[]='otqr_manage'; $vars[]='otqr_token'; $vars[]='otqr_token_view'; $vars[]='otqr_token_cover';
         return $vars;
     }
 
@@ -66,9 +73,21 @@ final class OTQR_Automator {
     public static function on_activate() {
         self::register_cpt(); self::add_rewrites();
         if (!get_option(self::OPT_PUBLIC_KEY)) { add_option(self::OPT_PUBLIC_KEY, self::generate_key(20)); }
+        self::ensure_tokens_for_existing_ots();
+        update_option(self::OPT_VERSION, self::VERSION);
         flush_rewrite_rules();
     }
     public static function on_deactivate() { flush_rewrite_rules(); }
+
+    public static function maybe_run_upgrade() {
+        $installed=get_option(self::OPT_VERSION,'');
+        if (!is_string($installed) || version_compare($installed,self::VERSION,'<')) {
+            self::add_rewrites();
+            self::ensure_tokens_for_existing_ots();
+            flush_rewrite_rules();
+            update_option(self::OPT_VERSION, self::VERSION);
+        }
+    }
 
     public static function admin_menu() {
         add_menu_page('OT QR','OT QR','manage_options',self::MENU_SLUG,[__CLASS__,'render_admin_page'],'dashicons-qr',58);
@@ -131,6 +150,35 @@ final class OTQR_Automator {
 
     private static function get_public_key(){ $k=get_option(self::OPT_PUBLIC_KEY,''); return is_string($k)?trim($k):''; }
 
+
+
+    private static function generate_public_token() {
+        return bin2hex(random_bytes(16));
+    }
+
+    private static function token_exists($token) {
+        $found=get_posts(['post_type'=>self::CPT,'post_status'=>'any','numberposts'=>1,'fields'=>'ids','meta_query'=>[['key'=>self::META_PUBLIC_TOKEN,'value'=>$token,'compare'=>'=']]]);
+        return !empty($found);
+    }
+
+    private static function ensure_public_token($post_id) {
+        $token=get_post_meta($post_id,self::META_PUBLIC_TOKEN,true);
+        if (is_string($token) && preg_match('/^[a-f0-9]{32}$/',$token)) return $token;
+        do { $token=self::generate_public_token(); } while(self::token_exists($token));
+        update_post_meta($post_id,self::META_PUBLIC_TOKEN,$token);
+        return $token;
+    }
+
+    private static function ensure_tokens_for_existing_ots() {
+        $ids=get_posts(['post_type'=>self::CPT,'post_status'=>'any','numberposts'=>-1,'fields'=>'ids']);
+        foreach($ids as $id){ self::ensure_public_token(intval($id)); }
+    }
+
+    private static function get_ot_post_by_token($token){
+        if (!is_string($token) || !preg_match('/^[a-f0-9]{32}$/',$token)) return 0;
+        $ids=get_posts(['post_type'=>self::CPT,'post_status'=>'publish','numberposts'=>1,'fields'=>'ids','meta_query'=>[['key'=>self::META_PUBLIC_TOKEN,'value'=>$token,'compare'=>'=']]]);
+        return !empty($ids)?intval($ids[0]):0;
+    }
     public static function render_admin_page() {
         if (!current_user_can('manage_options')) return;
 
@@ -140,13 +188,13 @@ final class OTQR_Automator {
 
         $key=self::get_public_key();
         $upload_url=add_query_arg(['k'=>$key], home_url('/otqr/upload/'));
-        $manage_url=add_query_arg(['k'=>$key], home_url('/otqr/manage/'));
+        $manage_url=home_url('/otqr/manage/');
         ?>
         <div class="wrap">
             <h1>OT QR Automator</h1>
             <?php if ($notice): ?><div class="notice notice-success is-dismissible"><p><?php echo esc_html($notice); ?></p></div><?php endif; ?>
 
-            <h2>Links con clave</h2>
+            <h2>Links</h2>
             <p><strong>Subir (solo PDF):</strong> <a href="<?php echo esc_url($upload_url); ?>" target="_blank" rel="noopener"><?php echo esc_html($upload_url); ?></a></p>
             <p><strong>Gestionar:</strong> <a href="<?php echo esc_url($manage_url); ?>" target="_blank" rel="noopener"><?php echo esc_html($manage_url); ?></a></p>
 
@@ -257,7 +305,7 @@ final class OTQR_Automator {
 
         $nonce_action=self::key_nonce_action();
         $k=sanitize_text_field(wp_unslash($_GET['k']));
-        $manage_url=add_query_arg(['k'=>$k], home_url('/otqr/manage/'));
+        $manage_url=home_url('/otqr/manage/');
         $form_action=add_query_arg(['k'=>$k], home_url('/otqr/upload/'));
         $nonce_val=wp_create_nonce($nonce_action);
 
@@ -310,8 +358,8 @@ final class OTQR_Automator {
                                         if ($delete_old==='1' && $old_attach) wp_delete_attachment($old_attach,true);
 
                                         $msg='OT subida correctamente.';
-                                        $cover_url=home_url('/ot/'.$ot.'/cover/');
-                                        flush_rewrite_rules(false);
+                                        $token=self::ensure_public_token($otqr_id);
+                                $cover_url=home_url('/otqr/cover/'.$token.'/');
                                     }
                                 }
                             }
@@ -359,10 +407,18 @@ final class OTQR_Automator {
 
     private static function handle_frontend_manage(){
         $title='Gestionar OTs'; $err=''; $msg='';
-        if (!self::public_key_ok()){ self::send_minimal_html($title,'<div class="card"><h1>Gestionar OTs</h1><p class="error">Acceso denegado.</p></div>'); exit; }
 
-        $k=sanitize_text_field(wp_unslash($_GET['k']));
-        $nonce_action=self::key_nonce_action();
+        if (!is_user_logged_in()) {
+            wp_safe_redirect(wp_login_url(home_url('/otqr/manage/')));
+            exit;
+        }
+
+        if (!current_user_can('manage_options')) {
+            self::send_minimal_html($title,'<div class="card"><h1>Gestionar OTs</h1><p class="error">No autorizado.</p></div>');
+            exit;
+        }
+
+        $nonce_action='otqr_manage_action';
         $nonce_val=wp_create_nonce($nonce_action);
 
         $ot_edit=isset($_GET['edit'])?self::normalize_ot_number(wp_unslash($_GET['edit'])):'';
@@ -435,7 +491,8 @@ final class OTQR_Automator {
         $query=new WP_Query(['post_type'=>self::CPT,'post_status'=>'publish','posts_per_page'=>$per_page,'paged'=>$paged,'orderby'=>'date','order'=>'DESC','fields'=>'ids']);
         $total_pages=max(1,intval($query->max_num_pages));
 
-        $upload_url=add_query_arg(['k'=>$k], home_url('/otqr/upload/'));
+        self::ensure_tokens_for_existing_ots();
+        $upload_url=add_query_arg(['k'=>self::get_public_key()], home_url('/otqr/upload/'));
         $base_url=home_url('/otqr/manage/');
 
         ob_start(); ?>
@@ -457,9 +514,11 @@ final class OTQR_Automator {
                 $modelo=get_post_meta($pid,self::META_MODELO,true);
                 $cliente=get_post_meta($pid,self::META_CLIENTE,true);
                 $attach=intval(get_post_meta($pid,self::META_ATTACHMENT_ID,true));
-                $pdf_url=$attach?wp_get_attachment_url($attach):'';
-                $cover_url=home_url('/ot/'.$num.'/cover/');
-                $edit_url=add_query_arg(['k'=>$k,'edit'=>$num], $base_url);
+                $token=self::ensure_public_token($pid);
+                $view_url=home_url('/otqr/ver/'.$token.'/');
+                $pdf_url=$attach?$view_url:'';
+                $cover_url=home_url('/otqr/cover/'.$token.'/');
+                $edit_url=add_query_arg(['edit'=>$num], $base_url);
             ?>
               <tr>
                 <td><span class="pill"><?php echo esc_html($num); ?></span></td>
@@ -474,8 +533,8 @@ final class OTQR_Automator {
             </tbody></table>
 
             <?php if ($total_pages>1):
-              $prev=$paged>1?add_query_arg(['k'=>$k,'p'=>$paged-1], $base_url):'';
-              $next=$paged<$total_pages?add_query_arg(['k'=>$k,'p'=>$paged+1], $base_url):'';
+              $prev=$paged>1?add_query_arg(['p'=>$paged-1], $base_url):'';
+              $next=$paged<$total_pages?add_query_arg(['p'=>$paged+1], $base_url):'';
             ?>
               <div class="row" style="margin-top:14px;">
                 <?php if($prev): ?><a class="btn" href="<?php echo esc_url($prev); ?>">← Anterior</a><?php endif; ?>
@@ -493,8 +552,10 @@ final class OTQR_Automator {
               $pid=self::get_ot_post_by_number($ot_edit);
               if ($pid):
                 $attach=intval(get_post_meta($pid,self::META_ATTACHMENT_ID,true));
-                $pdf_url=$attach?wp_get_attachment_url($attach):'';
-                $cover_url=home_url('/ot/'.$ot_edit.'/cover/');
+                $token=self::ensure_public_token($pid);
+                $view_url=home_url('/otqr/ver/'.$token.'/');
+                $pdf_url=$attach?$view_url:'';
+                $cover_url=home_url('/otqr/cover/'.$token.'/');
                 $modelo=get_post_meta($pid,self::META_MODELO,true);
                 $cliente=get_post_meta($pid,self::META_CLIENTE,true);
             ?>
@@ -579,46 +640,35 @@ final class OTQR_Automator {
     public static function handle_public_routes(){
         if (get_query_var('otqr_upload')) self::handle_frontend_upload();
         if (get_query_var('otqr_manage')) self::handle_frontend_manage();
-
         if (get_query_var('otqr_home')) {
-            $num=isset($_GET['ot'])?self::normalize_ot_number(wp_unslash($_GET['ot'])):'';
-            $title='OT QR';
-            ob_start(); ?>
-            <div class="card">
-              <h1>Carátula con QR</h1>
-              <p>Ingresa el número de OT para abrir <code>/ot/{NUM}/cover</code>.</p>
-              <form method="get" action="<?php echo esc_url(home_url('/otqr/')); ?>">
-                <label for="ot">N° OT</label>
-                <input id="ot" name="ot" inputmode="numeric" pattern="[0-9]*" placeholder="19230" value="<?php echo esc_attr($num); ?>" required />
-                <div class="row"><button type="submit" class="btn primary">Buscar</button></div>
-              </form>
-              <?php if ($num!==''):
-                $post_id=self::get_ot_post_by_number($num);
-                $cover_url=home_url('/ot/'.$num.'/cover/');
-                if ($post_id): ?>
-                  <div class="result"><div><strong>Link:</strong> <a href="<?php echo esc_url($cover_url); ?>" target="_blank" rel="noopener"><?php echo esc_html($cover_url); ?></a></div></div>
-                <?php else: ?>
-                  <div class="result"><div><strong>No existe OT <?php echo esc_html($num); ?></strong></div></div>
-                <?php endif; endif; ?>
-            </div>
-            <?php self::send_minimal_html($title, ob_get_clean()); exit;
+            status_header(404);
+            exit;
         }
 
-        $is_cover=get_query_var('otqr_cover');
-        $num=get_query_var('otqr_num');
-        if ($is_cover && $num){
-            $num=self::normalize_ot_number($num);
-            if ($num===''){ status_header(404); exit; }
-            $post_id=self::get_ot_post_by_number($num);
+        $token=get_query_var('otqr_token');
+        if (get_query_var('otqr_token_view') && $token){
+            $token=sanitize_text_field($token);
+            $post_id=self::get_ot_post_by_token($token);
             if (!$post_id){ status_header(404); exit; }
+            $attachment_id=intval(get_post_meta($post_id,self::META_ATTACHMENT_ID,true));
+            if (!$attachment_id){ status_header(404); exit; }
+            $url=wp_get_attachment_url($attachment_id);
+            if (!$url){ status_header(404); exit; }
+            header('X-Robots-Tag: noindex, nofollow', true);
+            wp_redirect($url,302);
+            exit;
+        }
 
-            $public_url=home_url('/ot/'.$num.'/');
+        if (get_query_var('otqr_token_cover') && $token){
+            $token=sanitize_text_field($token);
+            $post_id=self::get_ot_post_by_token($token);
+            if (!$post_id){ status_header(404); exit; }
+            $num=get_post_field('post_name',$post_id);
+            $public_url=home_url('/otqr/ver/'.$token.'/');
             $qr_img='https://api.qrserver.com/v1/create-qr-code/?size=600x600&data='.rawurlencode($public_url);
-
             $modelo=get_post_meta($post_id,self::META_MODELO,true);
             $cliente=get_post_meta($post_id,self::META_CLIENTE,true);
-
-            nocache_headers(); header('Content-Type: text/html; charset=UTF-8');
+            nocache_headers(); header('Content-Type: text/html; charset=UTF-8'); header('X-Robots-Tag: noindex, nofollow', true);
             $title='OT '.$num.' - Carátula QR';
             ?>
             <!doctype html>
@@ -654,20 +704,13 @@ final class OTQR_Automator {
                   </div>
                 <?php endif; ?>
               </div>
-            </body></html>
-            <?php
+            </body></html><?php
             exit;
         }
 
-        if (is_singular(self::CPT)) {
-            global $post;
-            if (!$post || $post->post_type !== self::CPT) return;
-            $attachment_id=intval(get_post_meta($post->ID,self::META_ATTACHMENT_ID,true));
-            if ($attachment_id){
-                $url=wp_get_attachment_url($attachment_id);
-                if ($url){ wp_redirect($url,302); exit; }
-            }
-            wp_die('OT creada, pero aún no tiene PDF asociado.','OT sin PDF',['response'=>404]);
+        if (get_query_var('otqr_cover') || is_singular(self::CPT)) {
+            status_header(404);
+            exit;
         }
     }
 }
