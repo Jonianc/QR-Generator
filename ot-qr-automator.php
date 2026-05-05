@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.2.3
+ * Version: 0.2.4
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -12,7 +12,7 @@ final class OTQR_Automator {
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
     const OPT_VERSION = 'otqr_plugin_version';
-    const VERSION = '0.2.3';
+    const VERSION = '0.2.4';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
     const META_MODELO = '_otqr_modelo';
@@ -474,11 +474,11 @@ final class OTQR_Automator {
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>" />
                 <div class="row"><div style="width:100%">
                     <label for="box_id">BOX asignado al QR</label>
-                    <label for="ot_pdf">PDF OT</label>
                     <select id="box_id" name="box_id" required style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);font-size:16px">
                         <option value="">Seleccionar BOX</option>
                         <?php foreach($active_boxes as $b): ?><option value="<?php echo esc_attr($b['id']); ?>"><?php echo esc_html($b['name']); ?></option><?php endforeach; ?>
                     </select>
+                    <label for="ot_pdf">PDF OT</label>
                     <input id="ot_pdf" name="ot_pdf" type="file" accept="application/pdf" required />
                     <div class="small" style="margin-top:6px;">
                         <label style="display:flex;gap:8px;align-items:center;">
@@ -699,11 +699,11 @@ final class OTQR_Automator {
                   <input id="cliente_meta" name="cliente" value="<?php echo esc_attr($cliente); ?>" placeholder="GARCES -MELIPILLA"/>
                 </div></div>
 
-                <div class="row"><button class="btn primary" type="submit">Guardar datos</button></div>
                 <div class="row" style="width:100%">
                   <label for="box_meta">BOX</label>
                   <select id="box_meta" name="box_id"><option value="" <?php selected($selected_box_id,''); ?>>Sin asignar</option><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($selected_box_id,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?></select>
                 </div>
+                <div class="row"><button class="btn primary" type="submit">Guardar datos</button></div>
               </form>
 
               <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;"/>

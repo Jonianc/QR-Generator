@@ -2,6 +2,17 @@
 
 Todos los cambios relevantes de este plugin se documentan en este archivo.
 
+## [Sin publicar]
+
+- _Sin cambios aún._
+
+## [0.2.4]
+
+### Corregido
+- Orden visual del selector BOX y campo PDF en subida pública.
+- Orden visual del selector BOX en edición de OT.
+- Restaurada sección [Sin publicar] del changelog formal.
+
 ## [0.2.3]
 
 ### Corregido
