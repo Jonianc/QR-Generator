@@ -7,6 +7,14 @@ Todos los cambios relevantes de este plugin se documentan en este archivo.
 ### Agregado
 - _Sin cambios aún._
 
+## [0.2.1]
+
+### Corregido
+- Enlaces PDF del gestor ahora usan ruta tokenizada `/otqr/ver/{token}/`.
+- Restaurado CSS completo de impresión en `/otqr/cover/{token}/`.
+- Eliminado código muerto del bloque `/otqr/` que quedó tras retorno 404.
+- Agregada migración/flush de rewrite una sola vez por cambio de versión.
+
 ## [0.2.0]
 
 ### Agregado

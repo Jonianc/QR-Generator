@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.2.0
+ * Version: 0.2.1
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -11,6 +11,8 @@ final class OTQR_Automator {
     const CPT = 'otqr';
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
+    const OPT_VERSION = 'otqr_plugin_version';
+    const VERSION = '0.2.1';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
     const META_MODELO = '_otqr_modelo';
@@ -25,6 +27,7 @@ final class OTQR_Automator {
 
         add_action('admin_menu', [__CLASS__, 'admin_menu']);
         add_action('admin_post_otqr_save_key', [__CLASS__, 'handle_admin_save_key']);
+        add_action('init', [__CLASS__, 'maybe_run_upgrade'], 20);
 
         register_activation_hook(__FILE__, [__CLASS__, 'on_activate']);
         register_deactivation_hook(__FILE__, [__CLASS__, 'on_deactivate']);
@@ -71,9 +74,20 @@ final class OTQR_Automator {
         self::register_cpt(); self::add_rewrites();
         if (!get_option(self::OPT_PUBLIC_KEY)) { add_option(self::OPT_PUBLIC_KEY, self::generate_key(20)); }
         self::ensure_tokens_for_existing_ots();
+        update_option(self::OPT_VERSION, self::VERSION);
         flush_rewrite_rules();
     }
     public static function on_deactivate() { flush_rewrite_rules(); }
+
+    public static function maybe_run_upgrade() {
+        $installed=get_option(self::OPT_VERSION,'');
+        if (!is_string($installed) || version_compare($installed,self::VERSION,'<')) {
+            self::add_rewrites();
+            self::ensure_tokens_for_existing_ots();
+            flush_rewrite_rules();
+            update_option(self::OPT_VERSION, self::VERSION);
+        }
+    }
 
     public static function admin_menu() {
         add_menu_page('OT QR','OT QR','manage_options',self::MENU_SLUG,[__CLASS__,'render_admin_page'],'dashicons-qr',58);
@@ -500,8 +514,9 @@ final class OTQR_Automator {
                 $modelo=get_post_meta($pid,self::META_MODELO,true);
                 $cliente=get_post_meta($pid,self::META_CLIENTE,true);
                 $attach=intval(get_post_meta($pid,self::META_ATTACHMENT_ID,true));
-                $pdf_url=$attach?wp_get_attachment_url($attach):'';
                 $token=self::ensure_public_token($pid);
+                $view_url=home_url('/otqr/ver/'.$token.'/');
+                $pdf_url=$attach?$view_url:'';
                 $cover_url=home_url('/otqr/cover/'.$token.'/');
                 $edit_url=add_query_arg(['edit'=>$num], $base_url);
             ?>
@@ -537,8 +552,9 @@ final class OTQR_Automator {
               $pid=self::get_ot_post_by_number($ot_edit);
               if ($pid):
                 $attach=intval(get_post_meta($pid,self::META_ATTACHMENT_ID,true));
-                $pdf_url=$attach?wp_get_attachment_url($attach):'';
                 $token=self::ensure_public_token($pid);
+                $view_url=home_url('/otqr/ver/'.$token.'/');
+                $pdf_url=$attach?$view_url:'';
                 $cover_url=home_url('/otqr/cover/'.$token.'/');
                 $modelo=get_post_meta($pid,self::META_MODELO,true);
                 $cliente=get_post_meta($pid,self::META_CLIENTE,true);
@@ -624,33 +640,9 @@ final class OTQR_Automator {
     public static function handle_public_routes(){
         if (get_query_var('otqr_upload')) self::handle_frontend_upload();
         if (get_query_var('otqr_manage')) self::handle_frontend_manage();
-
         if (get_query_var('otqr_home')) {
             status_header(404);
             exit;
-
-            $num=isset($_GET['ot'])?self::normalize_ot_number(wp_unslash($_GET['ot'])):'';
-            $title='OT QR';
-            ob_start(); ?>
-            <div class="card">
-              <h1>Carátula con QR</h1>
-              <p>Ingresa el número de OT para abrir <code>/ot/{NUM}/cover</code>.</p>
-              <form method="get" action="<?php echo esc_url(home_url('/otqr/')); ?>">
-                <label for="ot">N° OT</label>
-                <input id="ot" name="ot" inputmode="numeric" pattern="[0-9]*" placeholder="19230" value="<?php echo esc_attr($num); ?>" required />
-                <div class="row"><button type="submit" class="btn primary">Buscar</button></div>
-              </form>
-              <?php if ($num!==''):
-                $post_id=self::get_ot_post_by_number($num);
-                $token=self::ensure_public_token($pid);
-                $cover_url=home_url('/otqr/cover/'.$token.'/');
-                if ($post_id): ?>
-                  <div class="result"><div><strong>Link:</strong> <a href="<?php echo esc_url($cover_url); ?>" target="_blank" rel="noopener"><?php echo esc_html($cover_url); ?></a></div></div>
-                <?php else: ?>
-                  <div class="result"><div><strong>No existe OT <?php echo esc_html($num); ?></strong></div></div>
-                <?php endif; endif; ?>
-            </div>
-            <?php self::send_minimal_html($title, ob_get_clean()); exit;
         }
 
         $token=get_query_var('otqr_token');
@@ -679,13 +671,40 @@ final class OTQR_Automator {
             nocache_headers(); header('Content-Type: text/html; charset=UTF-8'); header('X-Robots-Tag: noindex, nofollow', true);
             $title='OT '.$num.' - Carátula QR';
             ?>
-            <!doctype html><html lang="es"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-              <title><?php echo esc_html($title); ?></title></head><body>
+            <!doctype html>
+            <html lang="es"><head>
+              <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+              <title><?php echo esc_html($title); ?></title>
+              <style>
+                @page { size: Letter; margin: 0; }
+                html, body { height: 100%; }
+                body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #fff; color: #000; }
+                .sheet { width: 8.5in; height: 11in; margin: 0 auto; display: flex; flex-direction: column; align-items: center; }
+                .qr { margin-top: 0.6in; width: 6.0in; height: 6.0in; }
+                .label { margin-top: 0.25in; font-size: 18px; letter-spacing: 0.3px; }
+                .ot { margin-top: 0.22in; font-size: 22px; }
+                .ot strong { font-weight: 800; }
+                .meta { margin-top: 0.18in; font-size: 14px; text-align:center; max-width: 7in; }
+                .meta .k { font-weight: 700; }
+                .toolbar { position: fixed; top: 12px; right: 12px; display: flex; gap: 8px; z-index: 999; }
+                .btn { appearance: none; border: 1px solid #ddd; background: #fff; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 12px; }
+                .btn:hover { border-color: #bbb; }
+                @media print { .toolbar { display: none !important; } }
+              </style>
+            </head><body>
               <div class="toolbar"><button class="btn" onclick="window.print()">Imprimir / Guardar PDF</button></div>
-              <div class="sheet"><img class="qr" src="<?php echo esc_url($qr_img); ?>" alt="QR" />
-                <div class="label">ESCANEA TU ORDEN DE TRABAJO</div><div class="ot">OT <strong><?php echo esc_html($num); ?></strong></div>
-                <?php if ($modelo || $cliente): ?><div class="meta"><?php if ($modelo): ?><div><span class="k">MODELO:</span> <?php echo esc_html($modelo); ?></div><?php endif; ?><?php if ($cliente): ?><div><span class="k">CLIENTE:</span> <?php echo esc_html($cliente); ?></div><?php endif; ?></div><?php endif; ?>
-              </div></body></html><?php
+              <div class="sheet">
+                <img class="qr" src="<?php echo esc_url($qr_img); ?>" alt="QR" />
+                <div class="label">ESCANEA TU ORDEN DE TRABAJO</div>
+                <div class="ot">OT <strong><?php echo esc_html($num); ?></strong></div>
+                <?php if ($modelo || $cliente): ?>
+                  <div class="meta">
+                    <?php if ($modelo): ?><div><span class="k">MODELO:</span> <?php echo esc_html($modelo); ?></div><?php endif; ?>
+                    <?php if ($cliente): ?><div><span class="k">CLIENTE:</span> <?php echo esc_html($cliente); ?></div><?php endif; ?>
+                  </div>
+                <?php endif; ?>
+              </div>
+            </body></html><?php
             exit;
         }
 
