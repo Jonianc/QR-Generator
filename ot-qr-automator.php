@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.2.1
+ * Version: 0.2.4
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -12,12 +12,14 @@ final class OTQR_Automator {
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
     const OPT_VERSION = 'otqr_plugin_version';
-    const VERSION = '0.2.1';
+    const VERSION = '0.2.4';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
     const META_MODELO = '_otqr_modelo';
     const META_CLIENTE = '_otqr_cliente';
     const META_PUBLIC_TOKEN = '_otqr_public_token';
+    const META_BOX_ID = '_otqr_box_id';
+    const OPT_BOXES = 'otqr_boxes';
 
     public static function init() {
         add_action('init', [__CLASS__, 'register_cpt']);
@@ -74,6 +76,7 @@ final class OTQR_Automator {
         self::register_cpt(); self::add_rewrites();
         if (!get_option(self::OPT_PUBLIC_KEY)) { add_option(self::OPT_PUBLIC_KEY, self::generate_key(20)); }
         self::ensure_tokens_for_existing_ots();
+        self::ensure_default_boxes();
         update_option(self::OPT_VERSION, self::VERSION);
         flush_rewrite_rules();
     }
@@ -84,6 +87,7 @@ final class OTQR_Automator {
         if (!is_string($installed) || version_compare($installed,self::VERSION,'<')) {
             self::add_rewrites();
             self::ensure_tokens_for_existing_ots();
+            self::ensure_default_boxes();
             flush_rewrite_rules();
             update_option(self::OPT_VERSION, self::VERSION);
         }
@@ -91,6 +95,45 @@ final class OTQR_Automator {
 
     public static function admin_menu() {
         add_menu_page('OT QR','OT QR','manage_options',self::MENU_SLUG,[__CLASS__,'render_admin_page'],'dashicons-qr',58);
+        add_submenu_page(self::MENU_SLUG, 'Gestión de BOX', 'BOX', 'manage_options', 'otqr-boxes', [__CLASS__, 'render_boxes_page']);
+    }
+    private static function generate_box_id() { return 'box_'.bin2hex(random_bytes(6)); }
+    private static function get_boxes() {
+        $boxes=get_option(self::OPT_BOXES,[]);
+        if (!is_array($boxes)) return [];
+        $out=[];
+        foreach($boxes as $b){
+            if (!is_array($b) || empty($b['id'])) continue;
+            $id=sanitize_key($b['id']);
+            if ($id==='') continue;
+            $out[]=['id'=>$id,'name'=>isset($b['name'])?self::normalize_text($b['name']):'','active'=>!empty($b['active']),'created_at'=>isset($b['created_at'])?sanitize_text_field($b['created_at']):''];
+        }
+        return $out;
+    }
+    private static function save_boxes($boxes){ update_option(self::OPT_BOXES, array_values($boxes)); }
+    private static function ensure_default_boxes() {
+        $boxes=self::get_boxes();
+        if (!empty($boxes)) return;
+        self::save_boxes([['id'=>self::generate_box_id(),'name'=>'BOX 1','active'=>true,'created_at'=>current_time('mysql')]]);
+    }
+    private static function get_active_boxes() {
+        return array_values(array_filter(self::get_boxes(), function($b){ return !empty($b['active']); }));
+    }
+    private static function get_box_by_id($box_id) {
+        foreach(self::get_boxes() as $box){ if ($box['id']===$box_id) return $box; }
+        return null;
+    }
+    private static function get_box_label_for_ot($post_id){
+        $box_id=get_post_meta($post_id,self::META_BOX_ID,true);
+        if (!is_string($box_id) || $box_id==='') return 'Sin asignar';
+        $box=self::get_box_by_id(sanitize_key($box_id));
+        if (!$box) return 'BOX eliminado/inactivo';
+        if (empty($box['active'])) return 'BOX eliminado/inactivo';
+        return $box['name']!==''?$box['name']:'BOX sin nombre';
+    }
+    private static function box_has_assigned_ots($box_id){
+        $found=get_posts(['post_type'=>self::CPT,'post_status'=>'any','numberposts'=>1,'fields'=>'ids','meta_query'=>[['key'=>self::META_BOX_ID,'value'=>$box_id,'compare'=>'=']]]);
+        return !empty($found);
     }
 
     private static function normalize_ot_number($v){ $v=is_string($v)?trim($v):''; return preg_replace('/\D+/','',$v); }
@@ -240,6 +283,54 @@ final class OTQR_Automator {
         wp_redirect(add_query_arg(['page'=>self::MENU_SLUG,'otqr_notice'=>rawurlencode('Clave actualizada.')], admin_url('admin.php')));
         exit;
     }
+    public static function render_boxes_page() {
+        if (!current_user_can('manage_options')) return;
+        self::ensure_default_boxes();
+        $msg=''; $err='';
+        if ($_SERVER['REQUEST_METHOD']==='POST'){
+            $action=isset($_POST['box_action'])?sanitize_text_field(wp_unslash($_POST['box_action'])):'';
+            check_admin_referer('otqr_boxes_'.$action);
+            $boxes=self::get_boxes();
+            if ($action==='create'){
+                $name=isset($_POST['box_name'])?self::normalize_text(wp_unslash($_POST['box_name'])):'';
+                if ($name==='') $err='Nombre de BOX obligatorio.';
+                else { $boxes[]=['id'=>self::generate_box_id(),'name'=>$name,'active'=>true,'created_at'=>current_time('mysql')]; self::save_boxes($boxes); $msg='BOX creada.'; }
+            } else {
+                $box_id=isset($_POST['box_id'])?sanitize_key(wp_unslash($_POST['box_id'])):'';
+                foreach($boxes as $idx=>$box){
+                    if ($box['id']!==$box_id) continue;
+                    if ($action==='rename'){ $name=isset($_POST['box_name'])?self::normalize_text(wp_unslash($_POST['box_name'])):''; if($name===''){ $err='Nombre inválido.'; } else { $boxes[$idx]['name']=$name; self::save_boxes($boxes); $msg='BOX actualizada.'; } }
+                    if ($action==='toggle'){ $boxes[$idx]['active']=empty($boxes[$idx]['active']); self::save_boxes($boxes); $msg='Estado de BOX actualizado.'; }
+                    if ($action==='delete'){ if(self::box_has_assigned_ots($box_id)){ $err='No se puede eliminar BOX con OTs asignadas.'; } else { unset($boxes[$idx]); self::save_boxes($boxes); $msg='BOX eliminada.'; } }
+                    break;
+                }
+            }
+        }
+        $boxes=self::get_boxes();
+        ?>
+        <div class="wrap"><h1>Gestión de BOX</h1>
+            <?php if ($msg): ?><div class="notice notice-success"><p><?php echo esc_html($msg); ?></p></div><?php endif; ?>
+            <?php if ($err): ?><div class="notice notice-error"><p><?php echo esc_html($err); ?></p></div><?php endif; ?>
+            <h2>Crear BOX</h2>
+            <form method="post"><?php wp_nonce_field('otqr_boxes_create'); ?><input type="hidden" name="box_action" value="create"/><input type="text" name="box_name" required /><button class="button button-primary" type="submit">Crear</button></form>
+            <h2 style="margin-top:20px;">BOX existentes</h2>
+            <table class="widefat"><thead><tr><th>Nombre</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
+                <?php foreach($boxes as $box): ?>
+                    <tr>
+                        <td>
+                            <form method="post" style="display:flex;gap:8px;"><?php wp_nonce_field('otqr_boxes_rename'); ?><input type="hidden" name="box_action" value="rename"/><input type="hidden" name="box_id" value="<?php echo esc_attr($box['id']); ?>"/><input type="text" name="box_name" value="<?php echo esc_attr($box['name']); ?>" required /><button class="button" type="submit">Guardar</button></form>
+                        </td>
+                        <td><?php echo !empty($box['active']) ? 'Activo' : 'Inactivo'; ?></td>
+                        <td style="display:flex;gap:8px;">
+                            <form method="post"><?php wp_nonce_field('otqr_boxes_toggle'); ?><input type="hidden" name="box_action" value="toggle"/><input type="hidden" name="box_id" value="<?php echo esc_attr($box['id']); ?>"/><button class="button" type="submit"><?php echo !empty($box['active']) ? 'Desactivar' : 'Activar'; ?></button></form>
+                            <form method="post" onsubmit="return confirm('¿Eliminar BOX?');"><?php wp_nonce_field('otqr_boxes_delete'); ?><input type="hidden" name="box_action" value="delete"/><input type="hidden" name="box_id" value="<?php echo esc_attr($box['id']); ?>"/><button class="button button-link-delete" type="submit">Eliminar</button></form>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody></table>
+        </div>
+        <?php
+    }
 
     // ---------- Frontend HTML ----------
     private static function send_minimal_html($title,$body_html){
@@ -308,58 +399,61 @@ final class OTQR_Automator {
         $manage_url=home_url('/otqr/manage/');
         $form_action=add_query_arg(['k'=>$k], home_url('/otqr/upload/'));
         $nonce_val=wp_create_nonce($nonce_action);
+        self::ensure_default_boxes();
+        $active_boxes=self::get_active_boxes();
 
         if ($_SERVER['REQUEST_METHOD']==='POST'){
             $nonce=isset($_POST['_wpnonce'])?sanitize_text_field(wp_unslash($_POST['_wpnonce'])):'';
             if (!wp_verify_nonce($nonce,$nonce_action)) $err='Sesión expirada. Recarga la página.';
-            else if (empty($_FILES['ot_pdf'])||empty($_FILES['ot_pdf']['tmp_name'])||!is_uploaded_file($_FILES['ot_pdf']['tmp_name'])) $err='Debes seleccionar un PDF.';
+            elseif (empty($_POST['box_id'])) $err='Debes seleccionar un BOX activo.';
+            elseif (empty($_FILES['ot_pdf'])||empty($_FILES['ot_pdf']['tmp_name'])||!is_uploaded_file($_FILES['ot_pdf']['tmp_name'])) $err='Debes seleccionar un PDF.';
             else {
-                $filetype=wp_check_filetype_and_ext($_FILES['ot_pdf']['tmp_name'], $_FILES['ot_pdf']['name']);
-                if ($filetype['ext']!=='pdf') $err='El archivo debe ser PDF.';
-                else {
-                    $max=20*1024*1024;
-                    if (!empty($_FILES['ot_pdf']['size']) && intval($_FILES['ot_pdf']['size'])>$max) $err='Archivo demasiado grande (máx 20MB).';
+                $box_id=sanitize_key(wp_unslash($_POST['box_id']));
+                $box=self::get_box_by_id($box_id);
+                if (!$box || empty($box['active'])) $err='BOX inválido o inactivo.';
+
+                if ($err==='') {
+                    $filetype=wp_check_filetype_and_ext($_FILES['ot_pdf']['tmp_name'], $_FILES['ot_pdf']['name']);
+                    if ($filetype['ext']!=='pdf') $err='El archivo debe ser PDF.';
                     else {
-                        // SOLO nombre de archivo
-                        $parsed=self::parse_from_filename_strict($_FILES['ot_pdf']['name']);
-                        if (!$parsed['ok']) {
-                            $err=$parsed['reason'];
-                        } else {
-                            $ot=$parsed['ot']; $modelo=$parsed['modelo']; $cliente=$parsed['cliente'];
-
-                            $otqr_id=self::upsert_ot_post($ot);
-                            if (!$otqr_id) $err='Error guardando la OT.';
+                        $max=20*1024*1024;
+                        if (!empty($_FILES['ot_pdf']['size']) && intval($_FILES['ot_pdf']['size'])>$max) $err='Archivo demasiado grande (máx 20MB).';
+                        else {
+                            $parsed=self::parse_from_filename_strict($_FILES['ot_pdf']['name']);
+                            if (!$parsed['ok']) $err=$parsed['reason'];
                             else {
-                                $old_attach=intval(get_post_meta($otqr_id,self::META_ATTACHMENT_ID,true));
-
-                                require_once ABSPATH.'wp-admin/includes/file.php';
-                                $overrides=[
-                                    'test_form'=>false,
-                                    'mimes'=>['pdf'=>'application/pdf'],
-                                    'unique_filename_callback'=>function($dir,$name,$ext)use($ot,$modelo,$cliente){
-                                        // conserva formato, acota largo
-                                        $safe_modelo=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$modelo)));
-                                        $safe_cliente=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$cliente)));
-                                        $base='OT '.$ot.', '.mb_substr($safe_modelo,0,25).', '.mb_substr($safe_cliente,0,35);
-                                        return $base.$ext;
-                                    }
-                                ];
-                                $uploaded=wp_handle_upload($_FILES['ot_pdf'],$overrides);
-                                if (isset($uploaded['error'])) $err='Error subiendo el PDF: '.$uploaded['error'];
+                                $ot=$parsed['ot']; $modelo=$parsed['modelo']; $cliente=$parsed['cliente'];
+                                $otqr_id=self::upsert_ot_post($ot);
+                                if (!$otqr_id) $err='Error guardando la OT.';
                                 else {
-                                    $attach_id=self::insert_pdf_as_attachment($uploaded);
-                                    if (!$attach_id) $err='PDF subido, pero no se pudo registrar en Media.';
+                                    $old_attach=intval(get_post_meta($otqr_id,self::META_ATTACHMENT_ID,true));
+                                    require_once ABSPATH.'wp-admin/includes/file.php';
+                                    $overrides=[
+                                        'test_form'=>false,
+                                        'mimes'=>['pdf'=>'application/pdf'],
+                                        'unique_filename_callback'=>function($dir,$name,$ext)use($ot,$modelo,$cliente){
+                                            $safe_modelo=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$modelo)));
+                                            $safe_cliente=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$cliente)));
+                                            $base='OT '.$ot.', '.mb_substr($safe_modelo,0,25).', '.mb_substr($safe_cliente,0,35);
+                                            return $base.$ext;
+                                        }
+                                    ];
+                                    $uploaded=wp_handle_upload($_FILES['ot_pdf'],$overrides);
+                                    if (isset($uploaded['error'])) $err='Error subiendo el PDF: '.$uploaded['error'];
                                     else {
-                                        update_post_meta($otqr_id,self::META_ATTACHMENT_ID,$attach_id);
-                                        update_post_meta($otqr_id,self::META_MODELO,$modelo);
-                                        update_post_meta($otqr_id,self::META_CLIENTE,$cliente);
-
-                                        $delete_old=isset($_POST['delete_old'])?sanitize_text_field(wp_unslash($_POST['delete_old'])):'';
-                                        if ($delete_old==='1' && $old_attach) wp_delete_attachment($old_attach,true);
-
-                                        $msg='OT subida correctamente.';
-                                        $token=self::ensure_public_token($otqr_id);
-                                $cover_url=home_url('/otqr/cover/'.$token.'/');
+                                        $attach_id=self::insert_pdf_as_attachment($uploaded);
+                                        if (!$attach_id) $err='PDF subido, pero no se pudo registrar en Media.';
+                                        else {
+                                            update_post_meta($otqr_id,self::META_ATTACHMENT_ID,$attach_id);
+                                            update_post_meta($otqr_id,self::META_MODELO,$modelo);
+                                            update_post_meta($otqr_id,self::META_CLIENTE,$cliente);
+                                            update_post_meta($otqr_id,self::META_BOX_ID,$box_id);
+                                            $delete_old=isset($_POST['delete_old'])?sanitize_text_field(wp_unslash($_POST['delete_old'])):'';
+                                            if ($delete_old==='1' && $old_attach) wp_delete_attachment($old_attach,true);
+                                            $msg='OT subida correctamente.';
+                                            $token=self::ensure_public_token($otqr_id);
+                                            $cover_url=home_url('/otqr/cover/'.$token.'/');
+                                        }
                                     }
                                 }
                             }
@@ -379,6 +473,11 @@ final class OTQR_Automator {
             <form method="post" enctype="multipart/form-data" action="<?php echo esc_url($form_action); ?>">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>" />
                 <div class="row"><div style="width:100%">
+                    <label for="box_id">BOX asignado al QR</label>
+                    <select id="box_id" name="box_id" required style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);font-size:16px">
+                        <option value="">Seleccionar BOX</option>
+                        <?php foreach($active_boxes as $b): ?><option value="<?php echo esc_attr($b['id']); ?>"><?php echo esc_html($b['name']); ?></option><?php endforeach; ?>
+                    </select>
                     <label for="ot_pdf">PDF OT</label>
                     <input id="ot_pdf" name="ot_pdf" type="file" accept="application/pdf" required />
                     <div class="small" style="margin-top:6px;">
@@ -435,9 +534,17 @@ final class OTQR_Automator {
                     if ($do==='save_meta'){
                         $modelo=isset($_POST['modelo'])?self::normalize_text(wp_unslash($_POST['modelo'])):'';
                         $cliente=isset($_POST['cliente'])?self::normalize_text(wp_unslash($_POST['cliente'])):'';
-                        update_post_meta($post_id,self::META_MODELO,$modelo);
-                        update_post_meta($post_id,self::META_CLIENTE,$cliente);
-                        $msg='Datos actualizados.'; $ot_edit=$target;
+                        $box_id=isset($_POST['box_id'])?sanitize_key(wp_unslash($_POST['box_id'])):'';
+                        $box=self::get_box_by_id($box_id);
+                        if ($box_id!=='' && (!$box || empty($box['active']))) {
+                            $err='BOX inválido o inactivo.';
+                        } else {
+                            update_post_meta($post_id,self::META_MODELO,$modelo);
+                            update_post_meta($post_id,self::META_CLIENTE,$cliente);
+                            if ($box_id==='') delete_post_meta($post_id,self::META_BOX_ID);
+                            else update_post_meta($post_id,self::META_BOX_ID,$box_id);
+                            $msg='Datos actualizados.'; $ot_edit=$target;
+                        }
                     } elseif ($do==='replace_pdf'){
                         if (empty($_FILES['ot_pdf'])||empty($_FILES['ot_pdf']['tmp_name'])||!is_uploaded_file($_FILES['ot_pdf']['tmp_name'])) $err='Debes seleccionar un PDF.';
                         else {
@@ -486,9 +593,13 @@ final class OTQR_Automator {
             }
         }
 
+        $box_filter=isset($_GET['box'])?sanitize_key(wp_unslash($_GET['box'])):'';
         $paged=isset($_GET['p'])?max(1,intval($_GET['p'])):1;
         $per_page=50;
-        $query=new WP_Query(['post_type'=>self::CPT,'post_status'=>'publish','posts_per_page'=>$per_page,'paged'=>$paged,'orderby'=>'date','order'=>'DESC','fields'=>'ids']);
+        $query_args=['post_type'=>self::CPT,'post_status'=>'publish','posts_per_page'=>$per_page,'paged'=>$paged,'orderby'=>'date','order'=>'DESC','fields'=>'ids'];
+        if ($box_filter==='none') $query_args['meta_query']=['relation'=>'OR',['key'=>self::META_BOX_ID,'compare'=>'NOT EXISTS'],['key'=>self::META_BOX_ID,'value'=>'','compare'=>'=']];
+        elseif ($box_filter!=='') $query_args['meta_query']=[['key'=>self::META_BOX_ID,'value'=>$box_filter,'compare'=>'=']];
+        $query=new WP_Query($query_args);
         $total_pages=max(1,intval($query->max_num_pages));
 
         self::ensure_tokens_for_existing_ots();
@@ -502,18 +613,20 @@ final class OTQR_Automator {
             <?php if ($err): ?><p class="error"><?php echo esc_html($err); ?></p><?php endif; ?>
             <?php if ($msg): ?><p class="ok"><?php echo esc_html($msg); ?></p><?php endif; ?>
             <div class="row"><a class="btn primary" href="<?php echo esc_url($upload_url); ?>">Subir nueva OT</a></div>
+            <form method="get" class="row"><input type="hidden" name="otqr_manage" value="1"/><label for="box_filter">Filtrar BOX</label><select id="box_filter" name="box"><option value="">Todos</option><option value="none" <?php selected($box_filter,'none'); ?>>Sin asignar</option><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($box_filter,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?></select><button class="btn" type="submit">Filtrar</button></form>
 
             <table><thead><tr>
-              <th>OT</th><th>Modelo</th><th>Cliente</th><th>PDF</th><th>Carátula</th><th>Fecha</th><th class="actions">Acciones</th>
+              <th>OT</th><th>Modelo</th><th>Cliente</th><th>BOX</th><th>PDF</th><th>Carátula</th><th>Fecha</th><th class="actions">Acciones</th>
             </tr></thead><tbody>
             <?php if (empty($query->posts)): ?>
-              <tr><td colspan="7" class="small">No hay OTs aún.</td></tr>
+              <tr><td colspan="8" class="small">No hay OTs aún.</td></tr>
             <?php else:
               foreach($query->posts as $pid):
                 $num=get_post_field('post_name',$pid);
                 $modelo=get_post_meta($pid,self::META_MODELO,true);
                 $cliente=get_post_meta($pid,self::META_CLIENTE,true);
                 $attach=intval(get_post_meta($pid,self::META_ATTACHMENT_ID,true));
+                $box_label=self::get_box_label_for_ot($pid);
                 $token=self::ensure_public_token($pid);
                 $view_url=home_url('/otqr/ver/'.$token.'/');
                 $pdf_url=$attach?$view_url:'';
@@ -524,6 +637,7 @@ final class OTQR_Automator {
                 <td><span class="pill"><?php echo esc_html($num); ?></span></td>
                 <td><?php echo $modelo?esc_html($modelo):'<span class="small">—</span>'; ?></td>
                 <td><?php echo $cliente?esc_html($cliente):'<span class="small">—</span>'; ?></td>
+                <td><?php echo esc_html($box_label); ?></td>
                 <td><?php echo $pdf_url?'<a href="'.esc_url($pdf_url).'" target="_blank" rel="noopener">Ver</a>':'<span class="small">Sin PDF</span>'; ?></td>
                 <td><a href="<?php echo esc_url($cover_url); ?>" target="_blank" rel="noopener">Abrir</a></td>
                 <td class="small"><?php echo esc_html(get_the_date('Y-m-d H:i',$pid)); ?></td>
@@ -533,8 +647,10 @@ final class OTQR_Automator {
             </tbody></table>
 
             <?php if ($total_pages>1):
-              $prev=$paged>1?add_query_arg(['p'=>$paged-1], $base_url):'';
-              $next=$paged<$total_pages?add_query_arg(['p'=>$paged+1], $base_url):'';
+              $prev_args=['p'=>$paged-1]; if($box_filter!=='') $prev_args['box']=$box_filter;
+              $next_args=['p'=>$paged+1]; if($box_filter!=='') $next_args['box']=$box_filter;
+              $prev=$paged>1?add_query_arg($prev_args, $base_url):'';
+              $next=$paged<$total_pages?add_query_arg($next_args, $base_url):'';
             ?>
               <div class="row" style="margin-top:14px;">
                 <?php if($prev): ?><a class="btn" href="<?php echo esc_url($prev); ?>">← Anterior</a><?php endif; ?>
@@ -558,6 +674,7 @@ final class OTQR_Automator {
                 $cover_url=home_url('/otqr/cover/'.$token.'/');
                 $modelo=get_post_meta($pid,self::META_MODELO,true);
                 $cliente=get_post_meta($pid,self::META_CLIENTE,true);
+                $selected_box_id=sanitize_key(get_post_meta($pid,self::META_BOX_ID,true));
             ?>
               <div class="result" style="border-top:none;padding-top:0;">
                 <div><strong>OT:</strong> <span class="pill"><?php echo esc_html($ot_edit); ?></span></div>
@@ -582,6 +699,10 @@ final class OTQR_Automator {
                   <input id="cliente_meta" name="cliente" value="<?php echo esc_attr($cliente); ?>" placeholder="GARCES -MELIPILLA"/>
                 </div></div>
 
+                <div class="row" style="width:100%">
+                  <label for="box_meta">BOX</label>
+                  <select id="box_meta" name="box_id"><option value="" <?php selected($selected_box_id,''); ?>>Sin asignar</option><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($selected_box_id,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?></select>
+                </div>
                 <div class="row"><button class="btn primary" type="submit">Guardar datos</button></div>
               </form>
 
@@ -668,6 +789,7 @@ final class OTQR_Automator {
             $qr_img='https://api.qrserver.com/v1/create-qr-code/?size=600x600&data='.rawurlencode($public_url);
             $modelo=get_post_meta($post_id,self::META_MODELO,true);
             $cliente=get_post_meta($post_id,self::META_CLIENTE,true);
+            $box_label=self::get_box_label_for_ot($post_id);
             nocache_headers(); header('Content-Type: text/html; charset=UTF-8'); header('X-Robots-Tag: noindex, nofollow', true);
             $title='OT '.$num.' - Carátula QR';
             ?>
@@ -697,10 +819,11 @@ final class OTQR_Automator {
                 <img class="qr" src="<?php echo esc_url($qr_img); ?>" alt="QR" />
                 <div class="label">ESCANEA TU ORDEN DE TRABAJO</div>
                 <div class="ot">OT <strong><?php echo esc_html($num); ?></strong></div>
-                <?php if ($modelo || $cliente): ?>
+                <?php if ($modelo || $cliente || $box_label): ?>
                   <div class="meta">
                     <?php if ($modelo): ?><div><span class="k">MODELO:</span> <?php echo esc_html($modelo); ?></div><?php endif; ?>
                     <?php if ($cliente): ?><div><span class="k">CLIENTE:</span> <?php echo esc_html($cliente); ?></div><?php endif; ?>
+                    <div><span class="k">BOX:</span> <?php echo esc_html($box_label); ?></div>
                   </div>
                 <?php endif; ?>
               </div>

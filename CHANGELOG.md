@@ -4,8 +4,35 @@ Todos los cambios relevantes de este plugin se documentan en este archivo.
 
 ## [Sin publicar]
 
-### Agregado
 - _Sin cambios aún._
+
+## [0.2.4]
+
+### Corregido
+- Orden visual del selector BOX y campo PDF en subida pública.
+- Orden visual del selector BOX en edición de OT.
+- Restaurada sección [Sin publicar] del changelog formal.
+
+## [0.2.3]
+
+### Corregido
+- Validación de BOX inválido/inactivo en subida pública: ahora se detiene el flujo y no crea/actualiza OTs.
+- Edición de OT sin asignar BOX accidentalmente: se agregó opción `Sin asignar` y al seleccionarla se limpia `_otqr_box_id`.
+- Filtro `Sin asignar` ahora considera OTs sin meta y con meta vacío.
+- Paginación del gestor conserva el filtro BOX activo.
+- Orden visual en subida pública: primero BOX y luego PDF.
+
+## [0.2.2]
+
+### Agregado
+- Gestión editable de BOX desde admin (`OT QR -> BOX`): crear, renombrar, activar/desactivar y eliminar con bloqueo si tiene OTs asignadas.
+- Selector obligatorio **“BOX asignado al QR”** en `/otqr/upload/?k=CLAVE`, mostrando solo BOX activos.
+- Guardado de BOX por OT en meta `_otqr_box_id`.
+- Columna BOX y filtro por BOX (incluye “Sin asignar”) en `/otqr/manage/`.
+- Visualización de BOX en `/otqr/cover/{token}/`.
+
+### Compatibilidad
+- OTs existentes sin BOX se mantienen operativas y se muestran como **“Sin asignar”**.
 
 ## [0.2.1]
 
