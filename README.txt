@@ -1,4 +1,4 @@
-OT QR Automator — v0.1.10
+OT QR Automator — v0.2.0
 
 Subida pública: SOLO PDF (sin campos), con clave.
 - /otqr/upload/?k=CLAVE
@@ -15,9 +15,15 @@ Gestor privado:
   - reemplazar PDF
   - renombrar OT
   - eliminar OT
+- Muestra enlaces públicos con token para abrir PDF y carátula.
 
-Carátula pública:
-- /ot/{NUM}/cover
+URLs públicas con token:
+- /otqr/ver/{token}/
+- /otqr/cover/{token}/
+
+Seguridad:
+- Las rutas numéricas antiguas (/ot/NUM/, /ot/NUM/cover/, /otqr/?ot=NUM) ya no son públicas.
+- El número OT se mantiene como dato interno administrativo.
 
 Historial de cambios completo:
 - Ver CHANGELOG.md

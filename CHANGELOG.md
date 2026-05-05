@@ -2,12 +2,28 @@
 
 Todos los cambios relevantes de este plugin se documentan en este archivo.
 
-El formato está basado en Keep a Changelog.
-
 ## [Sin publicar]
 
 ### Agregado
 - _Sin cambios aún._
+
+## [0.2.0]
+
+### Agregado
+- Token público único por OT en meta `_otqr_public_token`.
+- Nuevas rutas públicas por token: `/otqr/ver/{token}/` y `/otqr/cover/{token}/`.
+- Migración automática de OTs existentes sin token al activar y al cargar gestor.
+
+### Cambiado
+- El QR de la carátula ahora apunta a `/otqr/ver/{token}/`.
+- El gestor privado muestra enlaces públicos por token para PDF y carátula.
+
+### Corregido
+- Se eliminó `flush_rewrite_rules(false)` en cada subida pública.
+
+### Seguridad
+- Se bloqueó exposición pública por rutas numéricas: `/ot/NUM/`, `/ot/NUM/cover/` y `/otqr/?ot=NUM`.
+- Tokens inválidos o inexistentes devuelven 404.
 
 ## [0.1.10]
 
