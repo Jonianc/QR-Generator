@@ -2,10 +2,17 @@
 
 Todos los cambios relevantes de este plugin se documentan en este archivo.
 
-## [Sin publicar]
+## [0.2.2]
 
 ### Agregado
-- _Sin cambios aún._
+- Gestión editable de BOX desde admin (`OT QR -> BOX`): crear, renombrar, activar/desactivar y eliminar con bloqueo si tiene OTs asignadas.
+- Selector obligatorio **“BOX asignado al QR”** en `/otqr/upload/?k=CLAVE`, mostrando solo BOX activos.
+- Guardado de BOX por OT en meta `_otqr_box_id`.
+- Columna BOX y filtro por BOX (incluye “Sin asignar”) en `/otqr/manage/`.
+- Visualización de BOX en `/otqr/cover/{token}/`.
+
+### Compatibilidad
+- OTs existentes sin BOX se mantienen operativas y se muestran como **“Sin asignar”**.
 
 ## [0.2.1]
 
