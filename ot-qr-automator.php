@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.2.2
+ * Version: 0.2.3
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -12,7 +12,7 @@ final class OTQR_Automator {
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
     const OPT_VERSION = 'otqr_plugin_version';
-    const VERSION = '0.2.2';
+    const VERSION = '0.2.3';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
     const META_MODELO = '_otqr_modelo';
@@ -405,60 +405,55 @@ final class OTQR_Automator {
         if ($_SERVER['REQUEST_METHOD']==='POST'){
             $nonce=isset($_POST['_wpnonce'])?sanitize_text_field(wp_unslash($_POST['_wpnonce'])):'';
             if (!wp_verify_nonce($nonce,$nonce_action)) $err='Sesión expirada. Recarga la página.';
-            else if (empty($_POST['box_id'])) $err='Debes seleccionar un BOX activo.';
-            else if (empty($_FILES['ot_pdf'])||empty($_FILES['ot_pdf']['tmp_name'])||!is_uploaded_file($_FILES['ot_pdf']['tmp_name'])) $err='Debes seleccionar un PDF.';
+            elseif (empty($_POST['box_id'])) $err='Debes seleccionar un BOX activo.';
+            elseif (empty($_FILES['ot_pdf'])||empty($_FILES['ot_pdf']['tmp_name'])||!is_uploaded_file($_FILES['ot_pdf']['tmp_name'])) $err='Debes seleccionar un PDF.';
             else {
                 $box_id=sanitize_key(wp_unslash($_POST['box_id']));
                 $box=self::get_box_by_id($box_id);
-                if (!$box || empty($box['active'])) { $err='BOX inválido o inactivo.'; }
-                if ($err!=='') { /* pass */ }
-                $filetype=wp_check_filetype_and_ext($_FILES['ot_pdf']['tmp_name'], $_FILES['ot_pdf']['name']);
-                if ($err==='' && $filetype['ext']!=='pdf') $err='El archivo debe ser PDF.';
-                else {
-                    $max=20*1024*1024;
-                    if (!empty($_FILES['ot_pdf']['size']) && intval($_FILES['ot_pdf']['size'])>$max) $err='Archivo demasiado grande (máx 20MB).';
+                if (!$box || empty($box['active'])) $err='BOX inválido o inactivo.';
+
+                if ($err==='') {
+                    $filetype=wp_check_filetype_and_ext($_FILES['ot_pdf']['tmp_name'], $_FILES['ot_pdf']['name']);
+                    if ($filetype['ext']!=='pdf') $err='El archivo debe ser PDF.';
                     else {
-                        // SOLO nombre de archivo
-                        $parsed=self::parse_from_filename_strict($_FILES['ot_pdf']['name']);
-                        if (!$parsed['ok']) {
-                            $err=$parsed['reason'];
-                        } else {
-                            $ot=$parsed['ot']; $modelo=$parsed['modelo']; $cliente=$parsed['cliente'];
-
-                            $otqr_id=self::upsert_ot_post($ot);
-                            if (!$otqr_id) $err='Error guardando la OT.';
+                        $max=20*1024*1024;
+                        if (!empty($_FILES['ot_pdf']['size']) && intval($_FILES['ot_pdf']['size'])>$max) $err='Archivo demasiado grande (máx 20MB).';
+                        else {
+                            $parsed=self::parse_from_filename_strict($_FILES['ot_pdf']['name']);
+                            if (!$parsed['ok']) $err=$parsed['reason'];
                             else {
-                                $old_attach=intval(get_post_meta($otqr_id,self::META_ATTACHMENT_ID,true));
-
-                                require_once ABSPATH.'wp-admin/includes/file.php';
-                                $overrides=[
-                                    'test_form'=>false,
-                                    'mimes'=>['pdf'=>'application/pdf'],
-                                    'unique_filename_callback'=>function($dir,$name,$ext)use($ot,$modelo,$cliente){
-                                        // conserva formato, acota largo
-                                        $safe_modelo=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$modelo)));
-                                        $safe_cliente=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$cliente)));
-                                        $base='OT '.$ot.', '.mb_substr($safe_modelo,0,25).', '.mb_substr($safe_cliente,0,35);
-                                        return $base.$ext;
-                                    }
-                                ];
-                                $uploaded=wp_handle_upload($_FILES['ot_pdf'],$overrides);
-                                if (isset($uploaded['error'])) $err='Error subiendo el PDF: '.$uploaded['error'];
+                                $ot=$parsed['ot']; $modelo=$parsed['modelo']; $cliente=$parsed['cliente'];
+                                $otqr_id=self::upsert_ot_post($ot);
+                                if (!$otqr_id) $err='Error guardando la OT.';
                                 else {
-                                    $attach_id=self::insert_pdf_as_attachment($uploaded);
-                                    if (!$attach_id) $err='PDF subido, pero no se pudo registrar en Media.';
+                                    $old_attach=intval(get_post_meta($otqr_id,self::META_ATTACHMENT_ID,true));
+                                    require_once ABSPATH.'wp-admin/includes/file.php';
+                                    $overrides=[
+                                        'test_form'=>false,
+                                        'mimes'=>['pdf'=>'application/pdf'],
+                                        'unique_filename_callback'=>function($dir,$name,$ext)use($ot,$modelo,$cliente){
+                                            $safe_modelo=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$modelo)));
+                                            $safe_cliente=trim(preg_replace('/\s+/',' ', preg_replace('/[^A-Za-z0-9\- ]/','',$cliente)));
+                                            $base='OT '.$ot.', '.mb_substr($safe_modelo,0,25).', '.mb_substr($safe_cliente,0,35);
+                                            return $base.$ext;
+                                        }
+                                    ];
+                                    $uploaded=wp_handle_upload($_FILES['ot_pdf'],$overrides);
+                                    if (isset($uploaded['error'])) $err='Error subiendo el PDF: '.$uploaded['error'];
                                     else {
-                                        update_post_meta($otqr_id,self::META_ATTACHMENT_ID,$attach_id);
-                                        update_post_meta($otqr_id,self::META_MODELO,$modelo);
-                                        update_post_meta($otqr_id,self::META_CLIENTE,$cliente);
-                                        update_post_meta($otqr_id,self::META_BOX_ID,$box_id);
-
-                                        $delete_old=isset($_POST['delete_old'])?sanitize_text_field(wp_unslash($_POST['delete_old'])):'';
-                                        if ($delete_old==='1' && $old_attach) wp_delete_attachment($old_attach,true);
-
-                                        $msg='OT subida correctamente.';
-                                        $token=self::ensure_public_token($otqr_id);
-                                $cover_url=home_url('/otqr/cover/'.$token.'/');
+                                        $attach_id=self::insert_pdf_as_attachment($uploaded);
+                                        if (!$attach_id) $err='PDF subido, pero no se pudo registrar en Media.';
+                                        else {
+                                            update_post_meta($otqr_id,self::META_ATTACHMENT_ID,$attach_id);
+                                            update_post_meta($otqr_id,self::META_MODELO,$modelo);
+                                            update_post_meta($otqr_id,self::META_CLIENTE,$cliente);
+                                            update_post_meta($otqr_id,self::META_BOX_ID,$box_id);
+                                            $delete_old=isset($_POST['delete_old'])?sanitize_text_field(wp_unslash($_POST['delete_old'])):'';
+                                            if ($delete_old==='1' && $old_attach) wp_delete_attachment($old_attach,true);
+                                            $msg='OT subida correctamente.';
+                                            $token=self::ensure_public_token($otqr_id);
+                                            $cover_url=home_url('/otqr/cover/'.$token.'/');
+                                        }
                                     }
                                 }
                             }
@@ -478,8 +473,8 @@ final class OTQR_Automator {
             <form method="post" enctype="multipart/form-data" action="<?php echo esc_url($form_action); ?>">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>" />
                 <div class="row"><div style="width:100%">
-                    <label for="ot_pdf">PDF OT</label>
                     <label for="box_id">BOX asignado al QR</label>
+                    <label for="ot_pdf">PDF OT</label>
                     <select id="box_id" name="box_id" required style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);font-size:16px">
                         <option value="">Seleccionar BOX</option>
                         <?php foreach($active_boxes as $b): ?><option value="<?php echo esc_attr($b['id']); ?>"><?php echo esc_html($b['name']); ?></option><?php endforeach; ?>
@@ -544,10 +539,11 @@ final class OTQR_Automator {
                         if ($box_id!=='' && (!$box || empty($box['active']))) {
                             $err='BOX inválido o inactivo.';
                         } else {
-                        update_post_meta($post_id,self::META_MODELO,$modelo);
-                        update_post_meta($post_id,self::META_CLIENTE,$cliente);
-                        if ($box_id!=='') update_post_meta($post_id,self::META_BOX_ID,$box_id);
-                        $msg='Datos actualizados.'; $ot_edit=$target;
+                            update_post_meta($post_id,self::META_MODELO,$modelo);
+                            update_post_meta($post_id,self::META_CLIENTE,$cliente);
+                            if ($box_id==='') delete_post_meta($post_id,self::META_BOX_ID);
+                            else update_post_meta($post_id,self::META_BOX_ID,$box_id);
+                            $msg='Datos actualizados.'; $ot_edit=$target;
                         }
                     } elseif ($do==='replace_pdf'){
                         if (empty($_FILES['ot_pdf'])||empty($_FILES['ot_pdf']['tmp_name'])||!is_uploaded_file($_FILES['ot_pdf']['tmp_name'])) $err='Debes seleccionar un PDF.';
@@ -601,7 +597,7 @@ final class OTQR_Automator {
         $paged=isset($_GET['p'])?max(1,intval($_GET['p'])):1;
         $per_page=50;
         $query_args=['post_type'=>self::CPT,'post_status'=>'publish','posts_per_page'=>$per_page,'paged'=>$paged,'orderby'=>'date','order'=>'DESC','fields'=>'ids'];
-        if ($box_filter==='none') $query_args['meta_query']=[['key'=>self::META_BOX_ID,'compare'=>'NOT EXISTS']];
+        if ($box_filter==='none') $query_args['meta_query']=['relation'=>'OR',['key'=>self::META_BOX_ID,'compare'=>'NOT EXISTS'],['key'=>self::META_BOX_ID,'value'=>'','compare'=>'=']];
         elseif ($box_filter!=='') $query_args['meta_query']=[['key'=>self::META_BOX_ID,'value'=>$box_filter,'compare'=>'=']];
         $query=new WP_Query($query_args);
         $total_pages=max(1,intval($query->max_num_pages));
@@ -651,8 +647,10 @@ final class OTQR_Automator {
             </tbody></table>
 
             <?php if ($total_pages>1):
-              $prev=$paged>1?add_query_arg(['p'=>$paged-1], $base_url):'';
-              $next=$paged<$total_pages?add_query_arg(['p'=>$paged+1], $base_url):'';
+              $prev_args=['p'=>$paged-1]; if($box_filter!=='') $prev_args['box']=$box_filter;
+              $next_args=['p'=>$paged+1]; if($box_filter!=='') $next_args['box']=$box_filter;
+              $prev=$paged>1?add_query_arg($prev_args, $base_url):'';
+              $next=$paged<$total_pages?add_query_arg($next_args, $base_url):'';
             ?>
               <div class="row" style="margin-top:14px;">
                 <?php if($prev): ?><a class="btn" href="<?php echo esc_url($prev); ?>">← Anterior</a><?php endif; ?>
@@ -704,7 +702,7 @@ final class OTQR_Automator {
                 <div class="row"><button class="btn primary" type="submit">Guardar datos</button></div>
                 <div class="row" style="width:100%">
                   <label for="box_meta">BOX</label>
-                  <select id="box_meta" name="box_id"><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($selected_box_id,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?></select>
+                  <select id="box_meta" name="box_id"><option value="" <?php selected($selected_box_id,''); ?>>Sin asignar</option><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($selected_box_id,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?></select>
                 </div>
               </form>
 

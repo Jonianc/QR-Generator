@@ -2,6 +2,15 @@
 
 Todos los cambios relevantes de este plugin se documentan en este archivo.
 
+## [0.2.3]
+
+### Corregido
+- Validación de BOX inválido/inactivo en subida pública: ahora se detiene el flujo y no crea/actualiza OTs.
+- Edición de OT sin asignar BOX accidentalmente: se agregó opción `Sin asignar` y al seleccionarla se limpia `_otqr_box_id`.
+- Filtro `Sin asignar` ahora considera OTs sin meta y con meta vacío.
+- Paginación del gestor conserva el filtro BOX activo.
+- Orden visual en subida pública: primero BOX y luego PDF.
+
 ## [0.2.2]
 
 ### Agregado
