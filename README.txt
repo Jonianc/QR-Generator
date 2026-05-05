@@ -1,4 +1,4 @@
-OT QR Automator — v0.2.4
+OT QR Automator — v0.3.0
 
 Subida pública: PDF + BOX obligatorio, con clave.
 - /otqr/upload/?k=CLAVE
@@ -8,6 +8,14 @@ Nombre de archivo OBLIGATORIO:
 
 Si el nombre no cumple el formato, la subida se rechaza.
 Si no seleccionas BOX activo, la subida también se rechaza.
+
+Almacenamiento PDF privado:
+- Los PDFs ya no se publican en Media Library para acceso público directo.
+- Se guardan en carpeta privada del plugin: `wp-content/uploads/otqr-private/`.
+- Protección mínima incluida: `index.php`, `.htaccess` y `web.config`.
+- Los PDFs se sirven solo por ruta tokenizada: `/otqr/ver/{token}/`.
+- No se deben abrir ni compartir URLs directas de `/wp-content/uploads/`.
+- Nota Nginx: `.htaccess` no aplica en Nginx; si la carpeta privada queda bajo `uploads`, puede requerirse regla adicional de servidor.
 
 Gestión de BOX:
 - Admin WP → OT QR → BOX
