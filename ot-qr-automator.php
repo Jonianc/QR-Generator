@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.1.9
+ * Version: 0.1.10
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -257,7 +257,7 @@ final class OTQR_Automator {
 
         $nonce_action=self::key_nonce_action();
         $k=sanitize_text_field(wp_unslash($_GET['k']));
-        $manage_url=add_query_arg(['k'=>$k], home_url('/otqr/manage/'));
+        $manage_url=home_url('/otqr/manage/');
         $form_action=add_query_arg(['k'=>$k], home_url('/otqr/upload/'));
         $nonce_val=wp_create_nonce($nonce_action);
 

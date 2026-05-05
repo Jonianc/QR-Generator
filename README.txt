@@ -1,4 +1,4 @@
-OT QR Automator — v0.1.9
+OT QR Automator — v0.1.10
 
 Subida pública: SOLO PDF (sin campos), con clave.
 - /otqr/upload/?k=CLAVE
@@ -19,6 +19,8 @@ Carátula pública:
 - /ot/{NUM}/cover (muestra OT + MODELO + CLIENTE)
 
 Changelog
+- v0.1.10:
+  - En /otqr/upload/?k=CLAVE, el botón Gestionar ahora apunta a /otqr/manage/ sin clave.
 - v0.1.9:
   - El gestor /otqr/manage/ deja de usar ?k= en enlaces, paginación, edición y acciones.
   - El botón Gestionar en subida pública ahora apunta a /otqr/manage/ sin clave.
