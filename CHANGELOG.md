@@ -6,6 +6,17 @@ Todos los cambios relevantes de este plugin se documentan en este archivo.
 
 - _Sin cambios aún._
 
+## [0.4.0]
+
+### Agregado
+- Opción **"Escribir manualmente"** en BOX para subida pública y edición de OT.
+- Campo **"Nombre del BOX"** con validación frontend/servidor (2 a 80 caracteres) y sanitización.
+- Resolución automática de BOX manual: reutiliza BOX existente por nombre normalizado o crea uno nuevo activo en `otqr_boxes`.
+
+### Cambiado
+- Persistencia de BOX mantiene guardado por ID en meta `_otqr_box_id` también para BOX manuales.
+- Formato visual de fecha estandarizado a `DD-MM-AAAA` en el listado del gestor (`/otqr/manage/`).
+
 ## [0.3.0]
 
 ### Agregado
