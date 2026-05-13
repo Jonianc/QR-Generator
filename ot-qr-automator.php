@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.5.0
+ * Version: 0.6.0
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -12,7 +12,7 @@ final class OTQR_Automator {
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
     const OPT_VERSION = 'otqr_plugin_version';
-    const VERSION = '0.5.0';
+    const VERSION = '0.6.0';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
     const META_PDF_PRIVATE_PATH = '_otqr_pdf_private_path';
@@ -465,6 +465,8 @@ final class OTQR_Automator {
         .toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
         .toolbar .title p{margin:4px 0 0 0}
         .table-wrap{overflow:auto}
+        tr.row-editing{background:#f4fff7}
+        .anchor-focus{outline:2px solid #cfeedd;outline-offset:2px;border-radius:10px}
         .section-title{margin:0 0 8px 0;font-size:14px}
         .section{padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff}
         .section + .section{margin-top:10px}
@@ -718,7 +720,11 @@ final class OTQR_Automator {
         }
 
         $box_filter=isset($_GET['box'])?sanitize_key(wp_unslash($_GET['box'])):'';
+        if ($box_filter==='' && isset($_POST['box'])) $box_filter=sanitize_key(wp_unslash($_POST['box']));
         $paged=isset($_GET['p'])?max(1,intval($_GET['p'])):1;
+        if ($paged===1 && isset($_POST['p'])) $paged=max(1,intval(wp_unslash($_POST['p'])));
+        $context_args=['p'=>$paged];
+        if ($box_filter!=='') $context_args['box']=$box_filter;
         $per_page=50;
         $query_args=['post_type'=>self::CPT,'post_status'=>'publish','posts_per_page'=>$per_page,'paged'=>$paged,'orderby'=>'date','order'=>'DESC','fields'=>'ids'];
         if ($box_filter==='none') $query_args['meta_query']=['relation'=>'OR',['key'=>self::META_BOX_ID,'compare'=>'NOT EXISTS'],['key'=>self::META_BOX_ID,'value'=>'','compare'=>'=']];
@@ -732,7 +738,7 @@ final class OTQR_Automator {
 
         ob_start(); ?>
         <div class="grid">
-          <div class="card">
+          <div class="card" id="list-panel">
             <div class="toolbar">
               <div class="title">
                 <h1>OTs subidas</h1>
@@ -740,7 +746,7 @@ final class OTQR_Automator {
               </div>
               <div class="row" style="margin-top:0;">
                 <a class="btn primary" href="<?php echo esc_url($upload_url); ?>">Subir nueva OT</a>
-                <?php if ($box_filter!==''): ?><a class="btn" href="<?php echo esc_url($base_url); ?>">Quitar filtro</a><?php endif; ?>
+                <?php if ($box_filter!==''): ?><a class="btn" href="<?php echo esc_url(add_query_arg(['p'=>$paged],$base_url)); ?>">Quitar filtro</a><?php endif; ?>
               </div>
             </div>
             <?php if ($err): ?><p class="error"><?php echo esc_html($err); ?></p><?php endif; ?>
@@ -764,9 +770,10 @@ final class OTQR_Automator {
                 $view_url=home_url('/otqr/ver/'.$token.'/');
                 $pdf_url=$private_pdf?$view_url:'';
                 $cover_url=home_url('/otqr/cover/'.$token.'/');
-                $edit_url=add_query_arg(['edit'=>$num], $base_url);
+                $edit_args=$context_args; $edit_args['edit']=$num;
+                $edit_url=add_query_arg($edit_args, $base_url).'#edit-panel';
             ?>
-              <tr>
+              <tr class="<?php echo $ot_edit!=='' && $ot_edit===$num ? 'row-editing' : ''; ?>">
                 <td><span class="pill"><?php echo esc_html($num); ?></span></td>
                 <td><?php echo $modelo?esc_html($modelo):'<span class="small">—</span>'; ?></td>
                 <td><?php echo $cliente?esc_html($cliente):'<span class="small">—</span>'; ?></td>
@@ -781,8 +788,8 @@ final class OTQR_Automator {
             </div>
 
             <?php if ($total_pages>1):
-              $prev_args=['p'=>$paged-1]; if($box_filter!=='') $prev_args['box']=$box_filter;
-              $next_args=['p'=>$paged+1]; if($box_filter!=='') $next_args['box']=$box_filter;
+              $prev_args=['p'=>$paged-1]; if($box_filter!=='') $prev_args['box']=$box_filter; if($ot_edit!=='') $prev_args['edit']=$ot_edit;
+              $next_args=['p'=>$paged+1]; if($box_filter!=='') $next_args['box']=$box_filter; if($ot_edit!=='') $next_args['edit']=$ot_edit;
               $prev=$paged>1?add_query_arg($prev_args, $base_url):'';
               $next=$paged<$total_pages?add_query_arg($next_args, $base_url):'';
             ?>
@@ -794,9 +801,10 @@ final class OTQR_Automator {
             <?php endif; ?>
           </div>
 
-          <div class="card">
+          <div class="card" id="edit-panel">
             <h1>Editar OT</h1>
             <p>Corrige Modelo/Cliente o reemplaza el PDF.</p>
+            <div class="row" style="margin-top:0;"><a class="btn" href="<?php echo esc_url(add_query_arg($context_args, $base_url).'#list-panel'); ?>">Volver al listado filtrado</a></div>
 
             <?php if ($ot_edit):
               $pid=self::get_ot_post_by_number($ot_edit);
@@ -824,6 +832,8 @@ final class OTQR_Automator {
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
                 <input type="hidden" name="do" value="save_meta"/>
+                <input type="hidden" name="box" value="<?php echo esc_attr($box_filter); ?>"/>
+                <input type="hidden" name="p" value="<?php echo esc_attr($paged); ?>"/>
 
                 <label for="modelo_meta">Modelo</label>
                 <input id="modelo_meta" name="modelo" value="<?php echo esc_attr($modelo); ?>" placeholder="MF3307"/>
@@ -867,6 +877,8 @@ final class OTQR_Automator {
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
                 <input type="hidden" name="do" value="replace_pdf"/>
+                <input type="hidden" name="box" value="<?php echo esc_attr($box_filter); ?>"/>
+                <input type="hidden" name="p" value="<?php echo esc_attr($paged); ?>"/>
 
                 <label for="pdf_replace">Reemplazar PDF</label>
                 <input id="pdf_replace" name="ot_pdf" type="file" accept="application/pdf" required />
@@ -886,6 +898,8 @@ final class OTQR_Automator {
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
                 <input type="hidden" name="do" value="rename_ot"/>
+                <input type="hidden" name="box" value="<?php echo esc_attr($box_filter); ?>"/>
+                <input type="hidden" name="p" value="<?php echo esc_attr($paged); ?>"/>
 
                 <label for="new_ot">Cambiar N° OT</label>
                 <input id="new_ot" name="new_ot" inputmode="numeric" pattern="[0-9]*" placeholder="Nuevo número"/>
@@ -899,6 +913,8 @@ final class OTQR_Automator {
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
                 <input type="hidden" name="do" value="delete_ot"/>
+                <input type="hidden" name="box" value="<?php echo esc_attr($box_filter); ?>"/>
+                <input type="hidden" name="p" value="<?php echo esc_attr($paged); ?>"/>
 
                 <div class="small" style="margin-bottom:8px;">
                   <label style="display:flex;gap:8px;align-items:center;">
@@ -913,6 +929,19 @@ final class OTQR_Automator {
             <?php else: ?><p class="error">OT no encontrada.</p><?php endif; endif; ?>
           </div>
         </div>
+        <script>
+        (function(){
+          var action=<?php echo wp_json_encode($do); ?>;
+          var hasError=<?php echo $err!=='' ? 'true' : 'false'; ?>;
+          if(!action){return;}
+          var toList=(action==='delete_ot' && !hasError);
+          var targetId=toList?'list-panel':'edit-panel';
+          var target=document.getElementById(targetId);
+          if(!target){return;}
+          target.classList.add('anchor-focus');
+          target.scrollIntoView({behavior:'smooth',block:'start'});
+        })();
+        </script>
         <?php self::send_minimal_html($title, ob_get_clean()); exit;
     }
 

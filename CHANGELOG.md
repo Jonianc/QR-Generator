@@ -6,6 +6,14 @@ Todos los cambios relevantes de este plugin se documentan en este archivo.
 
 - _Sin cambios aún._
 
+## [0.6.0]
+
+### Cambiado
+- Gestor `/otqr/manage/`: se conserva contexto de uso (`box`, `p`, `edit`) al navegar entre listado y edición y al ejecutar acciones de edición.
+- Se agregó enlace **“Volver al listado filtrado”** en panel de edición.
+- Se resalta visualmente la fila de la OT en edición activa.
+- Retorno visual post-acción con foco automático: `save_meta`, `replace_pdf`, `rename_ot` vuelven al panel de edición; `delete_ot` vuelve al listado.
+
 ## [0.5.0]
 
 ### Cambiado
