@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.3.0
+ * Version: 0.4.0
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -12,7 +12,7 @@ final class OTQR_Automator {
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
     const OPT_VERSION = 'otqr_plugin_version';
-    const VERSION = '0.3.0';
+    const VERSION = '0.4.0';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
     const META_PDF_PRIVATE_PATH = '_otqr_pdf_private_path';
@@ -131,6 +131,27 @@ final class OTQR_Automator {
     private static function get_box_by_id($box_id) {
         foreach(self::get_boxes() as $box){ if ($box['id']===$box_id) return $box; }
         return null;
+    }
+    private static function normalize_box_name_for_match($name){
+        $name=sanitize_text_field($name);
+        $name=self::normalize_text($name);
+        return function_exists('mb_strtolower')?mb_strtolower($name,'UTF-8'):strtolower($name);
+    }
+    private static function resolve_box_id_from_name($name){
+        $clean=sanitize_text_field($name);
+        $clean=self::normalize_text($clean);
+        $len=function_exists('mb_strlen')?mb_strlen($clean,'UTF-8'):strlen($clean);
+        if ($len<2 || $len>80) return '';
+        $needle=self::normalize_box_name_for_match($clean);
+        foreach(self::get_boxes() as $box){
+            $existing=isset($box['name'])?self::normalize_box_name_for_match($box['name']):'';
+            if ($existing!=='' && $existing===$needle) return $box['id'];
+        }
+        $boxes=self::get_boxes();
+        $new_id=self::generate_box_id();
+        $boxes[]=['id'=>$new_id,'name'=>$clean,'active'=>true,'created_at'=>current_time('mysql')];
+        self::save_boxes($boxes);
+        return $new_id;
     }
     private static function get_box_label_for_ot($post_id){
         $box_id=get_post_meta($post_id,self::META_BOX_ID,true);
@@ -484,8 +505,19 @@ final class OTQR_Automator {
             elseif (empty($_FILES['ot_pdf'])||empty($_FILES['ot_pdf']['tmp_name'])||!is_uploaded_file($_FILES['ot_pdf']['tmp_name'])) $err='Debes seleccionar un PDF.';
             else {
                 $box_id=sanitize_key(wp_unslash($_POST['box_id']));
-                $box=self::get_box_by_id($box_id);
-                if (!$box || empty($box['active'])) $err='BOX inválido o inactivo.';
+                if ($box_id==='manual') {
+                    $box_manual=isset($_POST['box_manual'])?sanitize_text_field(wp_unslash($_POST['box_manual'])):'';
+                    $box_manual=self::normalize_text($box_manual);
+                    $box_len=function_exists('mb_strlen')?mb_strlen($box_manual,'UTF-8'):strlen($box_manual);
+                    if ($box_len<2 || $box_len>80) $err='Nombre del BOX inválido (2 a 80 caracteres).';
+                    else {
+                        $box_id=self::resolve_box_id_from_name($box_manual);
+                        if ($box_id==='') $err='No se pudo resolver el BOX manual.';
+                    }
+                } else {
+                    $box=self::get_box_by_id($box_id);
+                    if (!$box || empty($box['active'])) $err='BOX inválido o inactivo.';
+                }
 
                 if ($err==='') {
                     $filetype=wp_check_filetype_and_ext($_FILES['ot_pdf']['tmp_name'], $_FILES['ot_pdf']['name']);
@@ -537,7 +569,12 @@ final class OTQR_Automator {
                     <select id="box_id" name="box_id" required style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);font-size:16px">
                         <option value="">Seleccionar BOX</option>
                         <?php foreach($active_boxes as $b): ?><option value="<?php echo esc_attr($b['id']); ?>"><?php echo esc_html($b['name']); ?></option><?php endforeach; ?>
+                        <option value="manual">Escribir manualmente</option>
                     </select>
+                    <div id="box_manual_wrap" style="display:none;margin-top:8px;">
+                        <label for="box_manual">Nombre del BOX</label>
+                        <input id="box_manual" name="box_manual" type="text" minlength="2" maxlength="80" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);font-size:16px" />
+                    </div>
                     <label for="ot_pdf">PDF OT</label>
                     <input id="ot_pdf" name="ot_pdf" type="file" accept="application/pdf" required />
                     <div class="small" style="margin-top:6px;">
@@ -553,6 +590,22 @@ final class OTQR_Automator {
                     <a class="btn" href="<?php echo esc_url($manage_url); ?>">Gestionar</a>
                 </div>
             </form>
+            <script>
+            (function(){
+                var sel=document.getElementById('box_id');
+                var wrap=document.getElementById('box_manual_wrap');
+                var input=document.getElementById('box_manual');
+                if(!sel||!wrap||!input){return;}
+                function sync(){
+                    var manual=sel.value==='manual';
+                    wrap.style.display=manual?'block':'none';
+                    input.required=manual;
+                    if(!manual){input.value='';}
+                }
+                sel.addEventListener('change',sync);
+                sync();
+            })();
+            </script>
 
             <?php if ($cover_url): ?>
                 <div class="result">
@@ -595,10 +648,17 @@ final class OTQR_Automator {
                         $modelo=isset($_POST['modelo'])?self::normalize_text(wp_unslash($_POST['modelo'])):'';
                         $cliente=isset($_POST['cliente'])?self::normalize_text(wp_unslash($_POST['cliente'])):'';
                         $box_id=isset($_POST['box_id'])?sanitize_key(wp_unslash($_POST['box_id'])):'';
-                        $box=self::get_box_by_id($box_id);
-                        if ($box_id!=='' && (!$box || empty($box['active']))) {
-                            $err='BOX inválido o inactivo.';
-                        } else {
+                        if ($box_id==='manual') {
+                            $box_manual=isset($_POST['box_manual'])?sanitize_text_field(wp_unslash($_POST['box_manual'])):'';
+                            $box_manual=self::normalize_text($box_manual);
+                            $box_len=function_exists('mb_strlen')?mb_strlen($box_manual,'UTF-8'):strlen($box_manual);
+                            if ($box_len<2 || $box_len>80) $err='Nombre del BOX inválido (2 a 80 caracteres).';
+                            else $box_id=self::resolve_box_id_from_name($box_manual);
+                        } elseif ($box_id!=='') {
+                            $box=self::get_box_by_id($box_id);
+                            if (!$box || empty($box['active'])) $err='BOX inválido o inactivo.';
+                        }
+                        if ($err==='') {
                             update_post_meta($post_id,self::META_MODELO,$modelo);
                             update_post_meta($post_id,self::META_CLIENTE,$cliente);
                             if ($box_id==='') delete_post_meta($post_id,self::META_BOX_ID);
@@ -692,7 +752,7 @@ final class OTQR_Automator {
                 <td><?php echo esc_html($box_label); ?></td>
                 <td><?php echo $pdf_url?'<a href="'.esc_url($pdf_url).'" target="_blank" rel="noopener">Ver</a>':'<span class="small">Sin PDF</span>'; ?></td>
                 <td><a href="<?php echo esc_url($cover_url); ?>" target="_blank" rel="noopener">Abrir</a></td>
-                <td class="small"><?php echo esc_html(get_the_date('Y-m-d H:i',$pid)); ?></td>
+                <td class="small"><?php echo esc_html(get_the_date('d-m-Y',$pid)); ?></td>
                 <td class="actions"><a class="btn" href="<?php echo esc_url($edit_url); ?>">Editar</a></td>
               </tr>
             <?php endforeach; endif; ?>
@@ -753,10 +813,30 @@ final class OTQR_Automator {
 
                 <div class="row" style="width:100%">
                   <label for="box_meta">BOX</label>
-                  <select id="box_meta" name="box_id"><option value="" <?php selected($selected_box_id,''); ?>>Sin asignar</option><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($selected_box_id,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?></select>
+                  <select id="box_meta" name="box_id"><option value="" <?php selected($selected_box_id,''); ?>>Sin asignar</option><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($selected_box_id,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?><option value="manual">Escribir manualmente</option></select>
+                  <div id="box_meta_manual_wrap" style="display:none;margin-top:8px;">
+                    <label for="box_meta_manual">Nombre del BOX</label>
+                    <input id="box_meta_manual" name="box_manual" type="text" minlength="2" maxlength="80" />
+                  </div>
                 </div>
                 <div class="row"><button class="btn primary" type="submit">Guardar datos</button></div>
               </form>
+              <script>
+              (function(){
+                var sel=document.getElementById('box_meta');
+                var wrap=document.getElementById('box_meta_manual_wrap');
+                var input=document.getElementById('box_meta_manual');
+                if(!sel||!wrap||!input){return;}
+                function sync(){
+                  var manual=sel.value==='manual';
+                  wrap.style.display=manual?'block':'none';
+                  input.required=manual;
+                  if(!manual){input.value='';}
+                }
+                sel.addEventListener('change',sync);
+                sync();
+              })();
+              </script>
 
               <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;"/>
 
