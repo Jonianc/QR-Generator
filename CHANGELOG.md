@@ -6,6 +6,14 @@ Todos los cambios relevantes de este plugin se documentan en este archivo.
 
 - _Sin cambios aún._
 
+## [0.5.0]
+
+### Cambiado
+- Mejora visual base en `/otqr/manage/`: cabecera más clara, acciones principales visibles y alerta visual de éxito/error más contrastada.
+- Tabla del gestor con mayor legibilidad (hover suave, acciones compactas, contenedor con scroll horizontal en pantallas pequeñas).
+- Panel de edición reorganizado por bloques visuales: **Datos**, **PDF**, **Renombrar OT** y **Eliminar OT**.
+- Ajustes responsive mínimos para mejorar uso móvil sin alterar rutas, nonces, permisos, tokens, metadatos ni lógica de PDFs privados.
+
 ## [0.4.0]
 
 ### Agregado

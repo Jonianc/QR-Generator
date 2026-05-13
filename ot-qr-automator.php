@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.4.0
+ * Version: 0.5.0
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -12,7 +12,7 @@ final class OTQR_Automator {
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
     const OPT_VERSION = 'otqr_plugin_version';
-    const VERSION = '0.4.0';
+    const VERSION = '0.5.0';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
     const META_PDF_PRIVATE_PATH = '_otqr_pdf_private_path';
@@ -436,10 +436,10 @@ final class OTQR_Automator {
         <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
         <title><?php echo esc_html($title); ?></title>
         <style>
-        :root{--border:#e6e6e6;--text:#111;--muted:#666;--bg:#fff;--danger:#b00020;}
+        :root{--border:#e6e6e6;--text:#111;--muted:#666;--bg:#fff;--danger:#b00020;--ok:#137333;--surface:#fafafa;--surface-2:#f4f4f4;}
         *{box-sizing:border-box} body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
         .wrap{max-width:980px;margin:34px auto;padding:0 16px}
-        .card{border:1px solid var(--border);border-radius:14px;padding:18px}
+        .card{border:1px solid var(--border);border-radius:14px;padding:18px;background:#fff}
         h1{font-size:18px;margin:0 0 10px}
         p{margin:10px 0;color:var(--muted);font-size:13px;line-height:1.45}
         label{display:block;font-size:13px;margin:0 0 6px}
@@ -451,13 +451,25 @@ final class OTQR_Automator {
         .btn.danger{border-color:var(--danger);color:#fff;background:var(--danger)}
         .result{margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);font-size:13px}
         a{color:#111} code{background:#f6f6f6;padding:2px 6px;border-radius:6px}
-        .error{color:var(--danger);font-weight:600} .ok{color:#137333;font-weight:600}
+        .error,.ok{font-weight:600;padding:10px 12px;border-radius:10px;border:1px solid transparent}
+        .error{color:var(--danger);background:#fff5f7;border-color:#ffd9e1}
+        .ok{color:var(--ok);background:#f4fff7;border-color:#cfeedd}
         table{width:100%;border-collapse:collapse;margin-top:12px}
         th,td{font-size:13px;text-align:left;padding:10px 8px;border-bottom:1px solid var(--border);vertical-align:top}
-        th{color:#333;font-weight:700;background:#fafafa;position:sticky;top:0}
-        .small{font-size:12px;color:var(--muted)} .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#f4f4f4;font-size:12px}
-        .actions{white-space:nowrap} .grid{display:grid;grid-template-columns:1fr;gap:12px}
+        th{color:#333;font-weight:700;background:var(--surface);position:sticky;top:0}
+        tbody tr:hover{background:#fcfcfc}
+        .small{font-size:12px;color:var(--muted)} .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--surface-2);font-size:12px}
+        .actions{white-space:nowrap}
+        .actions .btn{padding:7px 9px;font-size:12px}
+        .grid{display:grid;grid-template-columns:1fr;gap:12px}
+        .toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+        .toolbar .title p{margin:4px 0 0 0}
+        .table-wrap{overflow:auto}
+        .section-title{margin:0 0 8px 0;font-size:14px}
+        .section{padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff}
+        .section + .section{margin-top:10px}
         @media(min-width:820px){.grid{grid-template-columns:1.1fr 0.9fr}}
+        @media(max-width:819px){.wrap{margin:16px auto}.card{padding:14px}}
         </style></head><body><div class="wrap"><?php echo $body_html; // phpcs:ignore ?></div></body></html>
         <?php
     }
@@ -721,12 +733,21 @@ final class OTQR_Automator {
         ob_start(); ?>
         <div class="grid">
           <div class="card">
-            <h1>OTs subidas</h1>
+            <div class="toolbar">
+              <div class="title">
+                <h1>OTs subidas</h1>
+                <p>Gestión rápida: filtrar, abrir PDF/Carátula y editar.</p>
+              </div>
+              <div class="row" style="margin-top:0;">
+                <a class="btn primary" href="<?php echo esc_url($upload_url); ?>">Subir nueva OT</a>
+                <?php if ($box_filter!==''): ?><a class="btn" href="<?php echo esc_url($base_url); ?>">Quitar filtro</a><?php endif; ?>
+              </div>
+            </div>
             <?php if ($err): ?><p class="error"><?php echo esc_html($err); ?></p><?php endif; ?>
             <?php if ($msg): ?><p class="ok"><?php echo esc_html($msg); ?></p><?php endif; ?>
-            <div class="row"><a class="btn primary" href="<?php echo esc_url($upload_url); ?>">Subir nueva OT</a></div>
             <form method="get" class="row"><input type="hidden" name="otqr_manage" value="1"/><label for="box_filter">Filtrar BOX</label><select id="box_filter" name="box"><option value="">Todos</option><option value="none" <?php selected($box_filter,'none'); ?>>Sin asignar</option><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($box_filter,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?></select><button class="btn" type="submit">Filtrar</button></form>
 
+            <div class="table-wrap">
             <table><thead><tr>
               <th>OT</th><th>Modelo</th><th>Cliente</th><th>BOX</th><th>PDF</th><th>Carátula</th><th>Fecha</th><th class="actions">Acciones</th>
             </tr></thead><tbody>
@@ -757,6 +778,7 @@ final class OTQR_Automator {
               </tr>
             <?php endforeach; endif; ?>
             </tbody></table>
+            </div>
 
             <?php if ($total_pages>1):
               $prev_args=['p'=>$paged-1]; if($box_filter!=='') $prev_args['box']=$box_filter;
@@ -796,8 +818,8 @@ final class OTQR_Automator {
                 </div>
               </div>
 
-              <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;"/>
-
+              <h2 class="section-title">Datos</h2>
+              <div class="section">
               <form method="post">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
@@ -821,6 +843,7 @@ final class OTQR_Automator {
                 </div>
                 <div class="row"><button class="btn primary" type="submit">Guardar datos</button></div>
               </form>
+              </div>
               <script>
               (function(){
                 var sel=document.getElementById('box_meta');
@@ -838,8 +861,8 @@ final class OTQR_Automator {
               })();
               </script>
 
-              <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;"/>
-
+              <h2 class="section-title">PDF</h2>
+              <div class="section">
               <form method="post" enctype="multipart/form-data">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
@@ -855,9 +878,10 @@ final class OTQR_Automator {
                 </div>
                 <div class="row"><button class="btn primary" type="submit">Guardar PDF</button></div>
               </form>
+              </div>
 
-              <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;"/>
-
+              <h2 class="section-title">Renombrar OT</h2>
+              <div class="section">
               <form method="post">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
@@ -867,9 +891,10 @@ final class OTQR_Automator {
                 <input id="new_ot" name="new_ot" inputmode="numeric" pattern="[0-9]*" placeholder="Nuevo número"/>
                 <div class="row"><button class="btn" type="submit">Renombrar</button></div>
               </form>
+              </div>
 
-              <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;"/>
-
+              <h2 class="section-title">Eliminar OT</h2>
+              <div class="section">
               <form method="post" onsubmit="return confirm('¿Eliminar OT <?php echo esc_js($ot_edit); ?>?');">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
@@ -884,6 +909,7 @@ final class OTQR_Automator {
 
                 <button class="btn danger" type="submit">Eliminar OT</button>
               </form>
+              </div>
             <?php else: ?><p class="error">OT no encontrada.</p><?php endif; endif; ?>
           </div>
         </div>
