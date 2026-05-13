@@ -6,6 +6,12 @@ Todos los cambios relevantes de este plugin se documentan en este archivo.
 
 - _Sin cambios aún._
 
+## [0.6.1]
+
+### Corregido
+- Regresión de navegación en `/otqr/manage/`: enlaces y formularios internos del gestor ahora fuerzan base explícita del gestor (`/otqr/manage/`) para evitar desvíos a URLs de página (ej. `/hello-world/`).
+- Se corrigió construcción de acciones y anclas internas (`#edit-panel`, `#list-panel`) manteniendo contexto `box`, `p` y `edit`.
+
 ## [0.6.0]
 
 ### Cambiado

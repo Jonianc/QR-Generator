@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OT QR Automator
  * Description: Frontend sin header/footer para subir PDF de OT y obtener carátula QR. Subida pública con clave y gestor privado para usuarios logueados con permisos. En subida: SOLO PDF (OT/modelo/cliente se extraen del nombre del archivo).
- * Version: 0.6.0
+ * Version: 0.6.1
  * Author: Rocket Solutions
  */
 if (!defined('ABSPATH')) { exit; }
@@ -12,7 +12,7 @@ final class OTQR_Automator {
     const MENU_SLUG = 'otqr-automator';
     const OPT_PUBLIC_KEY = 'otqr_public_upload_key';
     const OPT_VERSION = 'otqr_plugin_version';
-    const VERSION = '0.6.0';
+    const VERSION = '0.6.1';
 
     const META_ATTACHMENT_ID = '_otqr_attachment_id';
     const META_PDF_PRIVATE_PATH = '_otqr_pdf_private_path';
@@ -735,6 +735,12 @@ final class OTQR_Automator {
         self::ensure_tokens_for_existing_ots();
         $upload_url=add_query_arg(['k'=>self::get_public_key()], home_url('/otqr/upload/'));
         $base_url=home_url('/otqr/manage/');
+        $manage_action_url=add_query_arg($context_args,$base_url);
+        if ($ot_edit!=='') {
+            $manage_action_edit_url=add_query_arg(array_merge($context_args,['edit'=>$ot_edit]),$base_url).'#edit-panel';
+        } else {
+            $manage_action_edit_url=$manage_action_url.'#edit-panel';
+        }
 
         ob_start(); ?>
         <div class="grid">
@@ -751,7 +757,7 @@ final class OTQR_Automator {
             </div>
             <?php if ($err): ?><p class="error"><?php echo esc_html($err); ?></p><?php endif; ?>
             <?php if ($msg): ?><p class="ok"><?php echo esc_html($msg); ?></p><?php endif; ?>
-            <form method="get" class="row"><input type="hidden" name="otqr_manage" value="1"/><label for="box_filter">Filtrar BOX</label><select id="box_filter" name="box"><option value="">Todos</option><option value="none" <?php selected($box_filter,'none'); ?>>Sin asignar</option><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($box_filter,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?></select><button class="btn" type="submit">Filtrar</button></form>
+            <form method="get" action="<?php echo esc_url($base_url); ?>" class="row"><input type="hidden" name="otqr_manage" value="1"/><label for="box_filter">Filtrar BOX</label><select id="box_filter" name="box"><option value="">Todos</option><option value="none" <?php selected($box_filter,'none'); ?>>Sin asignar</option><?php foreach(self::get_active_boxes() as $b): ?><option value="<?php echo esc_attr($b['id']); ?>" <?php selected($box_filter,$b['id']); ?>><?php echo esc_html($b['name']); ?></option><?php endforeach; ?></select><button class="btn" type="submit">Filtrar</button></form>
 
             <div class="table-wrap">
             <table><thead><tr>
@@ -828,7 +834,7 @@ final class OTQR_Automator {
 
               <h2 class="section-title">Datos</h2>
               <div class="section">
-              <form method="post">
+              <form method="post" action="<?php echo esc_url($manage_action_edit_url); ?>">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
                 <input type="hidden" name="do" value="save_meta"/>
@@ -873,7 +879,7 @@ final class OTQR_Automator {
 
               <h2 class="section-title">PDF</h2>
               <div class="section">
-              <form method="post" enctype="multipart/form-data">
+              <form method="post" enctype="multipart/form-data" action="<?php echo esc_url($manage_action_edit_url); ?>">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
                 <input type="hidden" name="do" value="replace_pdf"/>
@@ -894,7 +900,7 @@ final class OTQR_Automator {
 
               <h2 class="section-title">Renombrar OT</h2>
               <div class="section">
-              <form method="post">
+              <form method="post" action="<?php echo esc_url($manage_action_edit_url); ?>">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
                 <input type="hidden" name="do" value="rename_ot"/>
@@ -909,7 +915,7 @@ final class OTQR_Automator {
 
               <h2 class="section-title">Eliminar OT</h2>
               <div class="section">
-              <form method="post" onsubmit="return confirm('¿Eliminar OT <?php echo esc_js($ot_edit); ?>?');">
+              <form method="post" action="<?php echo esc_url($manage_action_edit_url); ?>" onsubmit="return confirm('¿Eliminar OT <?php echo esc_js($ot_edit); ?>?');">
                 <input type="hidden" name="_wpnonce" value="<?php echo esc_attr($nonce_val); ?>"/>
                 <input type="hidden" name="ot" value="<?php echo esc_attr($ot_edit); ?>"/>
                 <input type="hidden" name="do" value="delete_ot"/>

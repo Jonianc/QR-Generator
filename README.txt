@@ -1,4 +1,4 @@
-OT QR Automator — v0.6.0
+OT QR Automator — v0.6.1
 
 Subida pública: PDF + BOX obligatorio, con clave (seleccionando BOX activo o escribiendo uno manualmente).
 - /otqr/upload/?k=CLAVE
