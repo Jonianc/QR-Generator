@@ -1,13 +1,13 @@
-OT QR Automator — v0.4.0
+OT QR Automator — v0.6.1
 
-Subida pública: PDF + BOX obligatorio, con clave.
+Subida pública: PDF + BOX obligatorio, con clave (seleccionando BOX activo o escribiendo uno manualmente).
 - /otqr/upload/?k=CLAVE
 
 Nombre de archivo OBLIGATORIO:
 - OT 19230, MF3307, GARCES -MELIPILLA.pdf
 
 Si el nombre no cumple el formato, la subida se rechaza.
-Si no seleccionas BOX activo, la subida también se rechaza.
+Si no seleccionas BOX activo ni escribes un BOX manual válido, la subida también se rechaza.
 
 Almacenamiento PDF privado:
 - Los PDFs ya no se publican en Media Library para acceso público directo.

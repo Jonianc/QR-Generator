@@ -6,6 +6,28 @@ Todos los cambios relevantes de este plugin se documentan en este archivo.
 
 - _Sin cambios aún._
 
+## [0.6.1]
+
+### Corregido
+- Regresión de navegación en `/otqr/manage/`: enlaces y formularios internos del gestor ahora fuerzan base explícita del gestor (`/otqr/manage/`) para evitar desvíos a URLs de página (ej. `/hello-world/`).
+- Se corrigió construcción de acciones y anclas internas (`#edit-panel`, `#list-panel`) manteniendo contexto `box`, `p` y `edit`.
+
+## [0.6.0]
+
+### Cambiado
+- Gestor `/otqr/manage/`: se conserva contexto de uso (`box`, `p`, `edit`) al navegar entre listado y edición y al ejecutar acciones de edición.
+- Se agregó enlace **“Volver al listado filtrado”** en panel de edición.
+- Se resalta visualmente la fila de la OT en edición activa.
+- Retorno visual post-acción con foco automático: `save_meta`, `replace_pdf`, `rename_ot` vuelven al panel de edición; `delete_ot` vuelve al listado.
+
+## [0.5.0]
+
+### Cambiado
+- Mejora visual base en `/otqr/manage/`: cabecera más clara, acciones principales visibles y alerta visual de éxito/error más contrastada.
+- Tabla del gestor con mayor legibilidad (hover suave, acciones compactas, contenedor con scroll horizontal en pantallas pequeñas).
+- Panel de edición reorganizado por bloques visuales: **Datos**, **PDF**, **Renombrar OT** y **Eliminar OT**.
+- Ajustes responsive mínimos para mejorar uso móvil sin alterar rutas, nonces, permisos, tokens, metadatos ni lógica de PDFs privados.
+
 ## [0.4.0]
 
 ### Agregado
